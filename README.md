@@ -4,6 +4,11 @@ Click on a trace of the Strava heatmap and the plugin creates the missing way, a
 
 Based on the idea and the algorithm of [osm-strava](https://github.com/archie83/osm-strava) (GPL-3.0).
 
+## Installation
+
+In JOSM, open *Preferences → Plugins*, search for **stravatracer** and enable it.
+The plugin can also be downloaded from the [releases](https://github.com/erickdeoliveiraleal/josm-strava-tracer/releases).
+
 ## How it works
 
 1. Select the **Strava trace** mode in the left toolbar.
@@ -54,7 +59,11 @@ When no trace is found, the plugin writes to `<JOSM user data directory>/stravat
 mvn package
 ```
 
-The plugin is built as `target/stravatracer.jar`. To install it, copy this file to `%APPDATA%\JOSM\plugins\` (Windows) or `~/.local/share/JOSM/plugins/` (Linux), restart JOSM and enable **stravatracer** in *Preferences → Plugins*.
+The plugin is built as `target/stravatracer.jar`. To test it, copy this file to `%APPDATA%\JOSM\plugins\` (Windows) or `~/.local/share/JOSM/plugins/` (Linux), restart JOSM and enable **stravatracer** in *Preferences → Plugins*.
+
+## Release
+
+Push a tag `vX.Y.Z`: the GitHub workflow builds the plugin with `Plugin-Version: X.Y.Z` and attaches `stravatracer.jar` to the release. The JOSM plugin list uses `releases/latest/download/stravatracer.jar`, so users get the new version automatically.
 
 ## Known limitations
 

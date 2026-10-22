@@ -6,13 +6,15 @@
 
     <groupId>org.openstreetmap.josm.plugins</groupId>
     <artifactId>stravatracer</artifactId>
-    <version>0.1.0</version>
+    <version>${revision}</version>
     <packaging>jar</packaging>
     <name>StravaTracer</name>
 
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <maven.compiler.release>11</maven.compiler.release>
+        <!-- Set by the release workflow from the git tag (v1.2.3 -> 1.2.3) -->
+        <revision>0.1.0-SNAPSHOT</revision>
         <josm.version>19613</josm.version>
     </properties>
 
@@ -56,9 +58,10 @@
                             <Plugin-Class>org.openstreetmap.josm.plugins.stravatracer.StravaTracerPlugin</Plugin-Class>
                             <Plugin-Version>${project.version}</Plugin-Version>
                             <Plugin-Mainversion>${josm.version}</Plugin-Mainversion>
-                            <Plugin-Description>Click on the Strava heatmap layer to trace a missing way and connect it to the existing ones.</Plugin-Description>
+                            <Plugin-Description>Click on a trace of the Strava heatmap imagery layer to create the missing way, connected to the existing ones. Requires a Strava heatmap layer with valid cookies. Always review the created ways before uploading.</Plugin-Description>
                             <Plugin-Icon>images/stravatracer.svg</Plugin-Icon>
-                            <Plugin-Link>https://github.com/archie83/osm-strava</Plugin-Link>
+                            <Plugin-Link>https://github.com/erickdeoliveiraleal/josm-strava-tracer</Plugin-Link>
+                            <Plugin-Minimum-Java-Version>11</Plugin-Minimum-Java-Version>
                             <Plugin-Canloadatruntime>true</Plugin-Canloadatruntime>
                             <Author>Erick de Oliveira Leal</Author>
                         </manifestEntries>
