@@ -37,6 +37,8 @@ Always review before uploading: the heatmap shows where people go, not whether t
 - JOSM 19613 or newer.
 - A visible TMS imagery layer whose name or URL contains `strava`, with a valid access (cookies). URLs containing `/hot/` use the "hot" palette, unless the received tile is a grey level image (new Strava tiles). The other ones are read as grey levels.
 
+The easiest way to get this layer is the [JOSM Strava Heatmap](https://github.com/zekefarwell/josm-strava-heatmap) browser extension: log in on [strava.com/heatmap](https://www.strava.com/heatmap), click its button, and it opens the heatmap layer in JOSM with the URL and cookies already set (JOSM remote control must be enabled). The Strava cookies expire frequently: when the plugin reports that the access was refused, open the layer again with the extension.
+
 ## Preferences
 
 Edit them in *Preferences → Advanced*:
