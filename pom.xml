@@ -42,6 +42,19 @@
 
     <build>
         <finalName>stravatracer</finalName>
+        <resources>
+            <resource>
+                <directory>src/main/resources</directory>
+            </resource>
+            <resource>
+                <directory>${project.basedir}</directory>
+                <targetPath>META-INF</targetPath>
+                <includes>
+                    <include>LICENSE</include>
+                    <include>NOTICE</include>
+                </includes>
+            </resource>
+        </resources>
         <plugins>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
@@ -58,7 +71,7 @@
                             <Plugin-Class>org.openstreetmap.josm.plugins.stravatracer.StravaTracerPlugin</Plugin-Class>
                             <Plugin-Version>${project.version}</Plugin-Version>
                             <Plugin-Mainversion>${josm.version}</Plugin-Mainversion>
-                            <Plugin-Description>Click on a trace of the Strava heatmap imagery layer to create the missing way, connected to the existing ones. Requires a Strava heatmap layer with valid cookies. Always review the created ways before uploading.</Plugin-Description>
+                            <Plugin-Description>Click on a trace of the Strava heatmap imagery layer to create the missing way, connected to the existing ones, or slide a roughly drawn way onto the heatmap trail (Shift+S). Requires a Strava heatmap layer with valid cookies. Always review the ways before uploading.</Plugin-Description>
                             <Plugin-Icon>images/stravatracer.svg</Plugin-Icon>
                             <Plugin-Link>https://github.com/erickdeoliveiraleal/josm-strava-tracer</Plugin-Link>
                             <Plugin-Minimum-Java-Version>11</Plugin-Minimum-Java-Version>

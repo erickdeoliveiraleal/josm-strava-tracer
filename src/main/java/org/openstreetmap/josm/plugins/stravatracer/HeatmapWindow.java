@@ -20,6 +20,7 @@ import org.openstreetmap.gui.jmapviewer.tilesources.AbstractTMSTileSource;
 import org.openstreetmap.josm.data.coor.LatLon;
 import org.openstreetmap.josm.data.imagery.ImageryInfo;
 import org.openstreetmap.josm.gui.layer.TMSLayer;
+import org.openstreetmap.josm.plugins.stravatracer.slide.SlideTiles;
 import org.openstreetmap.josm.tools.HttpClient;
 import org.openstreetmap.josm.tools.Logging;
 
@@ -111,16 +112,16 @@ public final class HeatmapWindow {
                 if (tile == null) {
                     continue;
                 }
-                // The new Strava tiles are grey levels, whatever the URL says
-                boolean tileHot = hot && tile.getColorModel().getColorSpace().getNumComponents() > 1;
+                int[] levels = intensities(tile, hot);
                 // Tiles with a different size (should not happen) are stretched
                 for (int y = 0; y < tileSize; y++) {
                     for (int x = 0; x < tileSize; x++) {
-                        int c = tile.getRGB(x * tile.getWidth() / tileSize, y * tile.getHeight() / tileSize);
+                        int tx = x * tile.getWidth() / tileSize;
+                        int ty = y * tile.getHeight() / tileSize;
                         if (argb != null) {
-                            argb[j * tileSize + y][i * tileSize + x] = c;
+                            argb[j * tileSize + y][i * tileSize + x] = tile.getRGB(tx, ty);
                         }
-                        intensity[j * tileSize + y][i * tileSize + x] = StravaPalette.intensity(c, tileHot);
+                        intensity[j * tileSize + y][i * tileSize + x] = levels[ty * tile.getWidth() + tx];
                     }
                 }
             }
@@ -132,14 +133,52 @@ public final class HeatmapWindow {
         return window;
     }
 
+    /**
+     * Returns the heat level (0-255) of every pixel of a tile. Strava's tiles carry the heat level whatever
+     * the palette shown (hot, blue, purple…): it is the palette index of the indexed tiles, and the value of
+     * the grey level tiles. Other images are converted from their colours.
+     * @param tile tile image
+     * @param hot {@code true} if the colours are those of the "hot" palette
+     * @return heat levels, row by row
+     */
+    static int[] intensities(BufferedImage tile, boolean hot) {
+        int width = tile.getWidth();
+        int height = tile.getHeight();
+        int[] levels = new int[width * height];
+        if (SlideTiles.isHeatEncoded(tile)) {
+            try {
+                float[] density = SlideTiles.decode(tile);
+                for (int i = 0; i < levels.length; i++) {
+                    levels[i] = Math.round(density[i] * 255);
+                }
+                return levels;
+            } catch (IOException e) {
+                Logging.trace(e);
+            }
+        }
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                levels[y * width + x] = StravaPalette.intensity(tile.getRGB(x, y), hot);
+            }
+        }
+        return levels;
+    }
+
     /** Removes the query string, which may contain credentials. */
     static String withoutQuery(String url) {
         int q = url.indexOf('?');
         return q < 0 ? url : url.substring(0, q) + "?...";
     }
 
-    /** Downloads a tile, or returns it from the cache when the window is enlarged. */
-    private static BufferedImage cachedDownload(ImageryInfo info, String url, List<String> log) throws IOException {
+    /**
+     * Downloads a tile, or returns it from the cache when it was downloaded recently.
+     * @param info imagery of the Strava layer (its cookies and HTTP headers are reused)
+     * @param url tile URL
+     * @param log receives the download log
+     * @return the tile image, or {@code null} for a tile without activity (HTTP 404, 410 or 204)
+     * @throws IOException if the tile cannot be downloaded
+     */
+    public static BufferedImage cachedDownload(ImageryInfo info, String url, List<String> log) throws IOException {
         synchronized (TILE_CACHE) {
             if (TILE_CACHE.containsKey(url)) {
                 return TILE_CACHE.get(url);
@@ -164,7 +203,7 @@ public final class HeatmapWindow {
             HttpClient.Response response = client.connect();
             int code = response.getResponseCode();
             log.add(withoutQuery(url) + " -> HTTP " + code + " " + response.getContentType());
-            if (code == 404 || code == 204) {
+            if (code == 404 || code == 410 || code == 204) {
                 return null;     // No activity in this tile
             }
             if (code == 401 || code == 403) {

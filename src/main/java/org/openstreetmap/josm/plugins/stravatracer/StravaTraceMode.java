@@ -12,7 +12,6 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -104,7 +103,7 @@ public class StravaTraceMode extends MapMode {
             notify(tr("No editable data layer"));
             return;
         }
-        AbstractTileSourceLayer<?> strava = findStravaLayer();
+        AbstractTileSourceLayer<?> strava = StravaLayers.find();
         if (strava == null) {
             notify(tr("No visible Strava heatmap layer. Add one from the Imagery menu."));
             return;
@@ -213,19 +212,6 @@ public class StravaTraceMode extends MapMode {
             }
         }
         return false;
-    }
-
-    private static AbstractTileSourceLayer<?> findStravaLayer() {
-        // The layer list is ordered from top to bottom
-        for (AbstractTileSourceLayer<?> layer : MainApplication.getLayerManager()
-                .getLayersOfType(AbstractTileSourceLayer.class)) {
-            String url = layer.getInfo().getUrl();
-            if (layer.isVisible() && (layer.getName().toLowerCase(Locale.ROOT).contains("strava")
-                    || (url != null && url.toLowerCase(Locale.ROOT).contains("strava")))) {
-                return layer;
-            }
-        }
-        return null;
     }
 
     static Map<String, String> parseTags(String text) {
