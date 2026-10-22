@@ -2,6 +2,10 @@
 
 Click on a trace of the Strava heatmap and the plugin creates the missing way, already connected to the existing ones.
 
+![One click on the heatmap creates a 3 km path](docs/demo.gif)
+
+🎬 [Full demo video on YouTube](https://www.youtube.com/watch?v=B0Jxzoc-fMQ)
+
 Based on the idea and the algorithm of [osm-strava](https://github.com/archie83/osm-strava) (GPL-3.0).
 
 ## Installation
