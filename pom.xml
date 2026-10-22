@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>org.openstreetmap.josm.plugins</groupId>
+    <artifactId>stravatracer</artifactId>
+    <version>0.1.0</version>
+    <packaging>jar</packaging>
+    <name>StravaTracer</name>
+
+    <properties>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <maven.compiler.release>11</maven.compiler.release>
+        <josm.version>19613</josm.version>
+    </properties>
+
+    <repositories>
+        <repository>
+            <id>josm-releases</id>
+            <url>https://josm.openstreetmap.de/repository/releases/</url>
+        </repository>
+    </repositories>
+
+    <dependencies>
+        <dependency>
+            <groupId>org.openstreetmap.josm</groupId>
+            <artifactId>josm</artifactId>
+            <version>${josm.version}</version>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <version>5.10.2</version>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <finalName>stravatracer</finalName>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>3.2.5</version>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-jar-plugin</artifactId>
+                <version>3.4.1</version>
+                <configuration>
+                    <archive>
+                        <manifestEntries>
+                            <Plugin-Class>org.openstreetmap.josm.plugins.stravatracer.StravaTracerPlugin</Plugin-Class>
+                            <Plugin-Version>${project.version}</Plugin-Version>
+                            <Plugin-Mainversion>${josm.version}</Plugin-Mainversion>
+                            <Plugin-Description>Click on the Strava heatmap layer to trace a missing way and connect it to the existing ones.</Plugin-Description>
+                            <Plugin-Icon>images/stravatracer.svg</Plugin-Icon>
+                            <Plugin-Link>https://github.com/archie83/osm-strava</Plugin-Link>
+                            <Plugin-Canloadatruntime>true</Plugin-Canloadatruntime>
+                            <Author>Erick de Oliveira Leal</Author>
+                        </manifestEntries>
+                    </archive>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+</project>
