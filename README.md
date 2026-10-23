@@ -50,7 +50,7 @@ The way is refitted onto the centre of the trail: every vertex is snapped to the
 - the vertices that became useless are deleted, unless tagged or used elsewhere; Slide's own points are removed first;
 - sliding a settled line again leaves it unchanged.
 
-Everything is a single command: Ctrl+Z undoes it. Slide uses the zoom 15 tiles of the Strava layer (with the zoom 14 tile where a zoom 15 tile is missing) and works on up to 1000 points and 16 tiles; bridges and tunnels are not moved, and the layer must have no imagery offset.
+Everything is a single command: Ctrl+Z undoes it. Slide uses the zoom 15 tiles of the Strava layer (with the zoom 14 tile where a zoom 15 tile is missing) and works on up to 1000 points and 144 tiles (the original allows 16, a limit made for a browser tab: a 17 km diagonal road needs about 72 tiles and 400 MB of memory, and slides in a few seconds plus the download). When JOSM has not enough memory left, Slide says so before downloading; bridges and tunnels are not moved, and the layer must have no imagery offset.
 
 The Java port follows the original function by function. `src/test/slide-diff` checks it: `generate.py` writes test cases (synthetic and real heatmap tiles, rough lines, junctions, protected nodes, coverage holes…), `run-js.mjs` runs the original JavaScript on them (`upstream/`, v0.15.0) and `SlideDifferentialTest` checks that the Java port gives the same raster (bit for bit) and the same lines.
 
@@ -106,4 +106,4 @@ Push a tag `vX.Y.Z`: the GitHub workflow builds the plugin with `Plugin-Version:
 - A trace longer than the maximum window is cut at the border (increase `stravatracer.maxradius`, or click again near the end).
 - Parts running parallel to an existing way, closer than `buffer` meters, are not detected.
 - Only the active data layer is used for the mask and the connections.
-- Slide: a faint trail right next to a brighter unmapped one may be left as drawn, and long lines must be slid in sections (as in the original).
+- Slide: a faint trail right next to a brighter unmapped one may be left as drawn (as in the original).

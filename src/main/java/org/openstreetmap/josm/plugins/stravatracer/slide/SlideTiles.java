@@ -28,6 +28,10 @@ import org.openstreetmap.josm.plugins.stravatracer.HeatmapWindow;
 public final class SlideTiles {
 
     public static final int SLIDE_ZOOM = 15;
+    /** Most tiles downloaded for one line (16 in the original, a limit made for a browser tab). */
+    public static final int MAX_TILES = 144;
+    /** Bytes per raster pixel at the peak of a run (raster, masked copy, tracking surface, buffers). */
+    static final long BYTES_PER_PIXEL = 28;
 
     /** The downloaded tiles and the padded pixel area around the line. */
     public static final class Loaded {
@@ -59,16 +63,19 @@ public final class SlideTiles {
         double padding = Math.ceil((SlideAlgorithm.MAX_SEARCH_RADIUS_METERS + SlideAlgorithm.CONTRAST_RADIUS_METERS)
                 / SlideAlgorithm.metersPerPixel(locations.get(0)[1], zoom)) + 3;
         SlideAlgorithm.Bounds bounds = SlideAlgorithm.lineBounds(locations, zoom, padding);
-        if ((double) (bounds.maxX - bounds.minX) * (bounds.maxY - bounds.minY) > 4000000) {
+        long pixels = (long) (bounds.maxX - bounds.minX + 1) * (bounds.maxY - bounds.minY + 1);
+        if (pixels > SlideAlgorithm.MAX_RASTER_PIXELS) {
             throw new IOException(tr("Slide area is too large. Select a shorter section of the line."));
         }
         int minX = Math.floorDiv(bounds.minX, 512);
         int maxX = Math.floorDiv(bounds.maxX, 512);
         int minY = Math.floorDiv(bounds.minY, 512);
         int maxY = Math.floorDiv(bounds.maxY, 512);
-        if ((maxX - minX + 1) * (maxY - minY + 1) > 16) {
+        int count = (maxX - minX + 1) * (maxY - minY + 1);
+        if (count > MAX_TILES) {
             throw new IOException(tr("Slide needs too many tiles. Select a shorter section of the line."));
         }
+        checkMemory(pixels, count);
         AbstractTMSTileSource source = TMSLayer.getTileSourceStatic(info);
         Map<String, SlideAlgorithm.Tile> cache = new HashMap<>();
         LinkedHashSet<SlideAlgorithm.Tile> tiles = new LinkedHashSet<>();
@@ -99,13 +106,36 @@ public final class SlideTiles {
         return new Loaded(new ArrayList<>(tiles), bounds);
     }
 
+    /**
+     * Checks that the run fits in the memory left to JOSM, so that a long line fails with a clear message
+     * instead of an OutOfMemoryError.
+     * @param pixels raster pixels
+     * @param tiles number of tiles
+     * @throws IOException if there is not enough memory
+     */
+    static void checkMemory(long pixels, int tiles) throws IOException {
+        // Raster arrays, plus the decoded tiles (float densities and cached images)
+        long needed = pixels * BYTES_PER_PIXEL + (long) tiles * 512 * 512 * 5;
+        Runtime runtime = Runtime.getRuntime();
+        long available = runtime.maxMemory() - (runtime.totalMemory() - runtime.freeMemory());
+        if (needed > available) {
+            System.gc();
+            available = runtime.maxMemory() - (runtime.totalMemory() - runtime.freeMemory());
+        }
+        if (needed > available) {
+            throw new IOException(tr("Not enough memory to slide such a long line at once (about {0} MB needed, "
+                    + "{1} MB available). Select a shorter section, or give JOSM more memory.",
+                    needed >> 20, available >> 20));
+        }
+    }
+
     private static SlideAlgorithm.Tile load(AbstractTMSTileSource source, ImageryInfo info, int z, int x, int y,
             Map<String, SlideAlgorithm.Tile> cache) throws IOException {
         String key = z + "/" + x + "/" + y;
         if (cache.containsKey(key)) {
             return cache.get(key);
         }
-        BufferedImage image = HeatmapWindow.cachedDownload(info, source.getTileUrl(z, x, y), new ArrayList<>());
+        BufferedImage image = HeatmapWindow.tile(info, source, z, x, y, new ArrayList<>());
         SlideAlgorithm.Tile tile = image == null ? null : new SlideAlgorithm.Tile(z, x, y, image.getWidth(),
                 image.getHeight(), decode(image));
         cache.put(key, tile);

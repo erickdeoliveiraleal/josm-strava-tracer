@@ -239,6 +239,18 @@ class SlideActionTest {
     }
 
     @Test
+    void longLinesAreRefusedOnlyWithoutEnoughMemory() throws Exception {
+        // A 17 km diagonal road: 72 tiles, 15 million pixels (refused by the original, at 16 tiles)
+        SlideTiles.checkMemory(1_000_000, 16);
+        assertTrue(72 <= SlideTiles.MAX_TILES);
+        assertTrue(15_400_000 <= SlideAlgorithm.MAX_RASTER_PIXELS);
+        // More than the memory left: a clear message instead of an OutOfMemoryError
+        java.io.IOException e = assertThrows(java.io.IOException.class,
+                () -> SlideTiles.checkMemory(Runtime.getRuntime().maxMemory(), 144));
+        assertTrue(e.getMessage().contains("memory"), e.getMessage());
+    }
+
+    @Test
     void decodesIndexedAndGreyTiles() throws Exception {
         // Indexed tile with Strava's ordered alpha ramp: the index is the heat
         byte[] r = new byte[256];

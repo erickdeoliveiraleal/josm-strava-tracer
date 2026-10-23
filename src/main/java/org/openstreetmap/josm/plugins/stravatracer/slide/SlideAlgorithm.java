@@ -62,6 +62,12 @@ public final class SlideAlgorithm {
     public static final double JUMP_METERS = 8;
     public static final double ALIGN_METERS = 6;
 
+    /**
+     * Largest raster (in pixels). The original allows 4 million pixels, a limit made for a browser tab; JOSM
+     * has more memory, so long lines can be slid in one go (see SlideTiles for the memory check).
+     */
+    public static final double MAX_RASTER_PIXELS = 40_000_000;
+
     /** "There is no heatmap trail here": an expected outcome, not a bug (SLIDE_NO_SIGNAL). */
     public static class NoSignalException extends RuntimeException {
         private static final long serialVersionUID = 1L;
@@ -320,7 +326,7 @@ public final class SlideAlgorithm {
         }
         int width = bounds.maxX - bounds.minX + 1;
         int height = bounds.maxY - bounds.minY + 1;
-        if (width < 2 || height < 2 || (double) width * height > 4000000) {
+        if (width < 2 || height < 2 || (double) width * height > MAX_RASTER_PIXELS) {
             throw new IllegalArgumentException("Slide area is too large. Select a shorter section of the line.");
         }
         float[] density = new float[width * height];

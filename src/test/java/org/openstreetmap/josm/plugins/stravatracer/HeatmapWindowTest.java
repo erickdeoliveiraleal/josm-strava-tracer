@@ -14,6 +14,64 @@ import org.junit.jupiter.api.Test;
 
 class HeatmapWindowTest {
 
+    @org.junit.jupiter.api.io.TempDir
+    static java.nio.file.Path josmHome;
+
+    @org.junit.jupiter.api.BeforeAll
+    static void setUpJosm() {
+        // A temporary JOSM home and tile cache, never the ones of the user
+        System.setProperty("josm.home", josmHome.toString());
+        System.setProperty("josm.cache", josmHome.resolve("cache").toString());
+        org.openstreetmap.josm.data.preferences.JosmBaseDirectories dirs =
+                org.openstreetmap.josm.data.preferences.JosmBaseDirectories.getInstance();
+        org.openstreetmap.josm.spi.preferences.Config.setBaseDirectoriesProvider(dirs);
+        org.openstreetmap.josm.spi.preferences.Config.setPreferencesInstance(
+                new org.openstreetmap.josm.data.Preferences(dirs));
+        org.openstreetmap.josm.spi.preferences.Config.setUrlsProvider(
+                org.openstreetmap.josm.data.preferences.JosmUrls.getInstance());
+    }
+
+    /** The tiles already shown by JOSM are read from its tile cache, with the same key as its tile loader. */
+    @Test
+    void tilesAreReadFromTheJosmCache() throws Exception {
+        org.openstreetmap.josm.data.imagery.ImageryInfo info = new org.openstreetmap.josm.data.imagery.ImageryInfo(
+                "strava test:1", "https://content-a.strava.com/identified/globalheat/all/blue/{zoom}/{x}/{y}.png",
+                "tms", null, null);
+        org.openstreetmap.gui.jmapviewer.tilesources.AbstractTMSTileSource source =
+                org.openstreetmap.josm.gui.layer.TMSLayer.getTileSourceStatic(info);
+        org.apache.commons.jcs3.access.CacheAccess<String, org.openstreetmap.josm.data.cache.BufferedImageCacheEntry>
+                cache = org.openstreetmap.josm.gui.layer.TMSLayer.getCache();
+        String key = new org.openstreetmap.josm.data.imagery.TMSCachedTileLoaderJob(null,
+                new org.openstreetmap.gui.jmapviewer.Tile(source, 12704, 17698, 15), cache,
+                new org.openstreetmap.josm.data.imagery.TileJobOptions(1000, 1000, java.util.Map.of(), 0), null)
+                .getCacheKey();
+        // A tile shown on the map: the original PNG bytes, with the palette
+        int[] blue = new int[256];
+        for (int i = 0; i < 256; i++) {
+            blue[i] = (16 + i * 239 / 255) << 16 | i << 8 | (75 + i * 180 / 255);
+        }
+        ByteArrayOutputStream png = new ByteArrayOutputStream();
+        ImageIO.write(indexed(blue), "png", png);
+        org.openstreetmap.josm.data.cache.CacheEntryAttributes ok = new org.openstreetmap.josm.data.cache.CacheEntryAttributes();
+        ok.setResponseCode(200);
+        cache.put(key, new org.openstreetmap.josm.data.cache.BufferedImageCacheEntry(png.toByteArray()), ok);
+        java.util.List<String> log = new java.util.ArrayList<>();
+        BufferedImage tile = HeatmapWindow.tile(info, source, 15, 12704, 17698, log);
+        assertArrayEquals(LEVELS, HeatmapWindow.intensities(tile, false));
+        org.junit.jupiter.api.Assertions.assertTrue(log.get(0).contains("JOSM cache"), log.toString());
+        // A tile without activity (HTTP 404 kept in the cache): no download either
+        String emptyKey = new org.openstreetmap.josm.data.imagery.TMSCachedTileLoaderJob(null,
+                new org.openstreetmap.gui.jmapviewer.Tile(source, 12705, 17698, 15), cache,
+                new org.openstreetmap.josm.data.imagery.TileJobOptions(1000, 1000, java.util.Map.of(), 0), null)
+                .getCacheKey();
+        org.openstreetmap.josm.data.cache.CacheEntryAttributes missing = new org.openstreetmap.josm.data.cache.CacheEntryAttributes();
+        missing.setResponseCode(404);
+        cache.put(emptyKey, new org.openstreetmap.josm.data.cache.BufferedImageCacheEntry(new byte[0]), missing);
+        log.clear();
+        org.junit.jupiter.api.Assertions.assertNull(HeatmapWindow.tile(info, source, 15, 12705, 17698, log));
+        org.junit.jupiter.api.Assertions.assertTrue(log.get(0).contains("JOSM cache"), log.toString());
+    }
+
     private static final int[] LEVELS = {0, 1, 40, 128, 200, 255};
 
     /** An indexed tile like Strava's: palette colours of the given style, alpha ramp from 0 to 255. */

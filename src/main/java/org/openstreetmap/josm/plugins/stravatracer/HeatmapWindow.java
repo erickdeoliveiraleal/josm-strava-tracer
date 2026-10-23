@@ -5,6 +5,7 @@ import static org.openstreetmap.josm.tools.I18n.tr;
 
 import java.awt.geom.Point2D;
 import java.awt.image.BufferedImage;
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URL;
@@ -13,10 +14,14 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 
 import javax.imageio.ImageIO;
 
+import org.apache.commons.jcs3.engine.behavior.ICacheElement;
 import org.openstreetmap.gui.jmapviewer.tilesources.AbstractTMSTileSource;
+import org.openstreetmap.josm.data.cache.BufferedImageCacheEntry;
+import org.openstreetmap.josm.data.cache.CacheEntryAttributes;
 import org.openstreetmap.josm.data.coor.LatLon;
 import org.openstreetmap.josm.data.imagery.ImageryInfo;
 import org.openstreetmap.josm.gui.layer.TMSLayer;
@@ -93,8 +98,7 @@ public final class HeatmapWindow {
                 if (ty < 0 || ty >= n) {
                     continue;
                 }
-                String url = source.getTileUrl(zoom, tx, ty);
-                tiles[j][i] = cachedDownload(info, url, log);
+                tiles[j][i] = tile(info, source, zoom, tx, ty, log);
                 if (tiles[j][i] != null && tileSize < 0) {
                     tileSize = tiles[j][i].getWidth();
                 }
@@ -168,6 +172,57 @@ public final class HeatmapWindow {
     static String withoutQuery(String url) {
         int q = url.indexOf('?');
         return q < 0 ? url : url.substring(0, q) + "?...";
+    }
+
+    /**
+     * Returns a tile of the heatmap layer: from the tiles used recently, then from the tile cache of JOSM
+     * (the tiles already shown on the map), and downloads it only when it is in neither.
+     * @param info imagery of the Strava layer (its cookies and HTTP headers are reused)
+     * @param source tile source of the layer
+     * @param z zoom
+     * @param x tile column
+     * @param y tile row
+     * @param log receives the download log
+     * @return the tile image, or {@code null} for a tile without activity
+     * @throws IOException if the tile cannot be downloaded
+     */
+    public static BufferedImage tile(ImageryInfo info, AbstractTMSTileSource source, int z, int x, int y,
+            List<String> log) throws IOException {
+        String url = source.getTileUrl(z, x, y);
+        synchronized (TILE_CACHE) {
+            if (TILE_CACHE.containsKey(url)) {
+                return TILE_CACHE.get(url);
+            }
+        }
+        try {
+            // Same key as JOSM's tile loader (TMSCachedTileLoaderJob)
+            String key = Objects.toString(source.getName(), "").replace(':', '_') + ':' + source.getTileId(z, x, y);
+            ICacheElement<String, BufferedImageCacheEntry> element = TMSLayer.getCache().getCacheElement(key);
+            if (element != null && element.getVal() != null) {
+                int code = element.getElementAttributes() instanceof CacheEntryAttributes
+                        ? ((CacheEntryAttributes) element.getElementAttributes()).getResponseCode() : 200;
+                byte[] content = element.getVal().getContent();
+                BufferedImage image = null;
+                boolean usable = false;
+                if (code == 404 || code == 410 || code == 204) {
+                    usable = true;     // No activity in this tile
+                } else if (content != null && content.length > 0) {
+                    // The original bytes of the tile: the palette (heat levels) is intact
+                    image = ImageIO.read(new ByteArrayInputStream(content));
+                    usable = image != null;
+                }
+                if (usable) {
+                    log.add(withoutQuery(url) + " -> JOSM cache (HTTP " + code + ")");
+                    synchronized (TILE_CACHE) {
+                        TILE_CACHE.put(url, image);
+                    }
+                    return image;
+                }
+            }
+        } catch (IOException | RuntimeException e) {
+            Logging.trace(e);
+        }
+        return cachedDownload(info, url, log);
     }
 
     /**
