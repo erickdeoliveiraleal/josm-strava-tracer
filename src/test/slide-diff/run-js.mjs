@@ -1,7 +1,10 @@
 // Run the original JavaScript Slide (upstream/, strava-heatmap-extension v0.15.0, MIT) on the cases of
 // generate.py, and write the expected results compared by SlideDifferentialTest:
 //
-//   node run-js.mjs
+//   node run-js.mjs [cases.json.gz [expected.json.gz]]
+//
+// Without arguments, the cases of generate.py are used. A diagnostics file written by the plugin when Slide
+// fails (stravatracer-debug/slide-*.json.gz) can be given instead, to replay that run.
 //
 // The pipeline mirrors slide/index.js: padded line bounds (tiles.js), createHeatmapRaster,
 // fixed indices from the OSM context (action.js), other highways, slideLineTwice, cleanSlideResult.
@@ -22,7 +25,9 @@ import { cleanSlideResult, fixedIndices } from './upstream/action.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const resources = path.join(here, '..', 'resources', 'slide');
-const input = JSON.parse(zlib.gunzipSync(fs.readFileSync(path.join(resources, 'cases.json.gz'))));
+const inputPath = process.argv[2] || path.join(resources, 'cases.json.gz');
+const outputPath = process.argv[3] || path.join(resources, 'expected.json.gz');
+const input = JSON.parse(zlib.gunzipSync(fs.readFileSync(inputPath)));
 
 // Same decoding as png.js: heat level / 255 in a Float32Array.
 function decodeTile(tile) {
@@ -125,6 +130,6 @@ for (const c of input.cases) {
   console.log(`${c.name}: ${summary}`);
 }
 fs.writeFileSync(
-  path.join(resources, 'expected.json.gz'),
+  outputPath,
   zlib.gzipSync(JSON.stringify({ cases: output }), { level: 9 })
 );

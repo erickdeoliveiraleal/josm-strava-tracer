@@ -72,6 +72,52 @@ class HeatmapWindowTest {
         org.junit.jupiter.api.Assertions.assertTrue(log.get(0).contains("JOSM cache"), log.toString());
     }
 
+    /** Cookies kept by JOSM's cookie store (until a restart) must not override the credentials of the layer. */
+    @Test
+    void storedCookiesAreForgotten() throws Exception {
+        java.net.CookieHandler previous = java.net.CookieHandler.getDefault();
+        java.net.CookieManager manager = new java.net.CookieManager(null, java.net.CookiePolicy.ACCEPT_ALL);
+        java.net.CookieHandler.setDefault(manager);
+        try {
+            java.net.URI uri = new java.net.URI("https://content-a.strava.com/");
+            for (String name : new String[] {"CloudFront-Signature", "CloudFront-Policy", "other"}) {
+                java.net.HttpCookie cookie = new java.net.HttpCookie(name, "old");
+                cookie.setDomain("content-a.strava.com");
+                cookie.setPath("/");
+                manager.getCookieStore().add(uri, cookie);
+            }
+            String url = "https://content-a.strava.com/identified/globalheat/all/blue/15/1/2.png";
+            // Only the cookies that the layer sets itself
+            org.junit.jupiter.api.Assertions.assertTrue(
+                    HeatmapWindow.forgetStoredCookies(url, "CloudFront-Signature=new; CloudFront-Policy=new", false));
+            org.junit.jupiter.api.Assertions.assertEquals(1, manager.getCookieStore().get(uri).size());
+            // After a refusal: all the cookies of the host
+            org.junit.jupiter.api.Assertions.assertTrue(HeatmapWindow.forgetStoredCookies(url, null, true));
+            org.junit.jupiter.api.Assertions.assertTrue(manager.getCookieStore().get(uri).isEmpty());
+            org.junit.jupiter.api.Assertions.assertFalse(HeatmapWindow.forgetStoredCookies(url, null, true));
+        } finally {
+            java.net.CookieHandler.setDefault(previous);
+        }
+    }
+
+    /** The Strava browser extensions put the credentials in the URL template, as a header. */
+    @Test
+    void headersOfTheUrlTemplateAreSent() throws Exception {
+        org.openstreetmap.josm.data.imagery.ImageryInfo info = new org.openstreetmap.josm.data.imagery.ImageryInfo(
+                "strava header", "https://content-a.strava.com/identified/globalheat/all/hot/{zoom}/{x}/{y}.png"
+                + "{header(Cookie,CloudFront-Policy=abc;CloudFront-Signature=def)}", "tms", null, null);
+        org.openstreetmap.gui.jmapviewer.tilesources.AbstractTMSTileSource source =
+                org.openstreetmap.josm.gui.layer.TMSLayer.getTileSourceStatic(info);
+        org.junit.jupiter.api.Assertions.assertEquals("CloudFront-Policy=abc;CloudFront-Signature=def",
+                HeatmapWindow.headers(info, source).get("Cookie"));
+        org.junit.jupiter.api.Assertions.assertEquals(
+                "https://content-a.strava.com/identified/globalheat/all/hot/15/1/2.png", source.getTileUrl(15, 1, 2));
+        // Never written to the diagnostics
+        org.junit.jupiter.api.Assertions.assertEquals(
+                "https://content-a.strava.com/identified/globalheat/all/hot/{zoom}/{x}/{y}.png{header(Cookie,...)}",
+                HeatmapWindow.withoutQuery(info.getUrl()));
+    }
+
     private static final int[] LEVELS = {0, 1, 40, 128, 200, 255};
 
     /** An indexed tile like Strava's: palette colours of the given style, alpha ramp from 0 to 255. */

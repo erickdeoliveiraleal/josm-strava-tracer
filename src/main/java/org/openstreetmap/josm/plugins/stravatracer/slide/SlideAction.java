@@ -216,6 +216,11 @@ public class SlideAction extends JosmAction {
         private volatile boolean cancelled;
         private Result result;
         private Exception error;
+        // Inputs of the run, for the diagnostics
+        private SlideCleanup.Selection selection;
+        private List<SlideAlgorithm.Tile> tiles;
+        private final List<SlideDebug.OtherWay> debugWays = new ArrayList<>();
+        private final List<List<Integer>> debugNodeOthers = new ArrayList<>();
 
         SlideTask(DataSet ds, Target target, ImageryInfo info) {
             super(tr("Slide along Strava heatmap"), false);
@@ -236,7 +241,6 @@ public class SlideAction extends JosmAction {
         @Override
         protected void realRun() {
             try {
-                SlideCleanup.Selection selection;
                 List<double[]> locations = new ArrayList<>();
                 List<List<double[]>> others = new ArrayList<>();
                 ds.getReadLock().lock();
@@ -259,10 +263,29 @@ public class SlideAction extends JosmAction {
                     double pad = SlideAlgorithm.MAX_SEARCH_RADIUS_METERS / 111320;
                     double padLon = pad / Math.cos(Math.toRadians((minLat + maxLat) / 2));
                     BBox box = new BBox(minLon - padLon, minLat - pad, maxLon + padLon, maxLat + pad);
+                    List<Way> otherWays = new ArrayList<>();
                     for (Way other : ds.searchWays(box)) {
                         if (other != target.way && other.isUsable() && isHighway(other)) {
                             others.add(geometry(other));
+                            otherWays.add(other);
                         }
+                    }
+                    // For the diagnostics: the ways connected to the line, highways or not
+                    for (Node n : target.nodes) {
+                        List<Integer> indices = new ArrayList<>();
+                        for (Way parent : n.getParentWays()) {
+                            if (parent == target.way) {
+                                continue;
+                            }
+                            if (!otherWays.contains(parent)) {
+                                otherWays.add(parent);
+                            }
+                            indices.add(otherWays.indexOf(parent));
+                        }
+                        debugNodeOthers.add(indices);
+                    }
+                    for (Way other : otherWays) {
+                        debugWays.add(new SlideDebug.OtherWay(isHighway(other), geometry(other)));
                     }
                 } finally {
                     ds.getReadLock().unlock();
@@ -272,6 +295,7 @@ public class SlideAction extends JosmAction {
                 SlideTiles.Loaded loaded = SlideTiles.load(info, locations, () -> cancelled,
                         v -> getProgressMonitor().setTicks((int) (v * 35)));
                 getProgressMonitor().subTask(tr("Following heatmap density…"));
+                tiles = loaded.tiles;
                 SlideRaster raster = SlideAlgorithm.createHeatmapRaster(loaded.tiles, SlideTiles.SLIDE_ZOOM,
                         loaded.bounds);
                 SlideAlgorithm.Options options = new SlideAlgorithm.Options();
@@ -292,6 +316,21 @@ public class SlideAction extends JosmAction {
             } catch (RuntimeException e) {
                 Logging.error(e);
                 error = e;
+                dump(e.toString());
+            }
+        }
+
+        /** Writes the run as a test case, and returns a sentence telling where, or an empty string. */
+        private String dump(String message) {
+            if (selection == null || tiles == null) {
+                return "";
+            }
+            try {
+                return "<br>" + tr("Diagnostics: {0}",
+                        SlideDebug.write(message, tiles, selection, debugNodeOthers, debugWays, result).getPath());
+            } catch (IOException | RuntimeException e) {
+                Logging.warn(e);
+                return "";
             }
         }
 
@@ -333,7 +372,7 @@ public class SlideAction extends JosmAction {
                     UndoRedoHandler.getInstance().add(command);
                 }
             } catch (IllegalStateException e) {
-                SlideAction.notify(e.getMessage());
+                SlideAction.notify(e.getMessage() + dump(e.getMessage()));
                 return;
             }
             List<String> messages = new ArrayList<>();
@@ -369,18 +408,25 @@ public class SlideAction extends JosmAction {
                 keptIndexes.add(point.nodeIndex);
             }
             if (point.loc.length != 2 || !Double.isFinite(point.loc[0]) || !Double.isFinite(point.loc[1])) {
-                throw new IllegalStateException(tr("Invalid Slide result. No edits were applied."));
+                throw invalid(tr("invalid coordinates"));
             }
         }
         Set<Integer> kept = new HashSet<>(keptIndexes);
-        boolean ascending = true;
-        for (int i = 1; i < keptIndexes.size(); i++) {
-            ascending &= keptIndexes.get(i) > keptIndexes.get(i - 1);
+        if (keptIndexes.isEmpty() || keptIndexes.get(0) != 0) {
+            throw invalid(tr("it does not start at the first point"));
         }
-        if (keptIndexes.isEmpty() || keptIndexes.get(0) != 0
-                || keptIndexes.get(keptIndexes.size() - 1) != selection.nodes.size() - 1 || !ascending
-                || !kept.containsAll(protectedNodes)) {
-            throw new IllegalStateException(tr("Invalid Slide result. No edits were applied."));
+        if (keptIndexes.get(keptIndexes.size() - 1) != selection.nodes.size() - 1) {
+            throw invalid(tr("it does not end at the last point"));
+        }
+        for (int i = 1; i < keptIndexes.size(); i++) {
+            if (keptIndexes.get(i) <= keptIndexes.get(i - 1)) {
+                throw invalid(tr("point {0} comes after point {1}", keptIndexes.get(i), keptIndexes.get(i - 1)));
+            }
+        }
+        for (int index : protectedNodes) {
+            if (!kept.contains(index)) {
+                throw invalid(tr("protected point {0} ({1}) was dropped", index, target.nodes.get(index).getUniqueId()));
+            }
         }
         int last = target.nodes.size() - 1;
         if (target.nodes.get(0) == target.nodes.get(last)
@@ -441,6 +487,10 @@ public class SlideAction extends JosmAction {
             commands.add(new DeleteCommand(ds, dropped));
         }
         return new SequenceCommand(tr("Slide along Strava heatmap"), commands);
+    }
+
+    private static IllegalStateException invalid(String reason) {
+        return new IllegalStateException(tr("Invalid Slide result ({0}). No edits were applied.", reason));
     }
 
     @Override

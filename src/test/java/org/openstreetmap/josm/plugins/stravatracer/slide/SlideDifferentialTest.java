@@ -37,8 +37,14 @@ class SlideDifferentialTest {
     /** Tolerance on the coordinates, in degrees (about 0.1 mm). */
     private static final double TOLERANCE = 1e-9;
 
+    /**
+     * Reads a case file: the resource, or the file given by the system property slide.cases / slide.expected
+     * (to replay a diagnostics file of the plugin).
+     */
     private static JsonObject read(String name) throws IOException {
-        try (InputStream in = SlideDifferentialTest.class.getResourceAsStream("/slide/" + name);
+        String override = System.getProperty(name.startsWith("cases") ? "slide.cases" : "slide.expected");
+        try (InputStream in = override != null ? java.nio.file.Files.newInputStream(java.nio.file.Paths.get(override))
+                : SlideDifferentialTest.class.getResourceAsStream("/slide/" + name);
              JsonReader reader = Json.createReader(new InputStreamReader(new GZIPInputStream(in), StandardCharsets.UTF_8))) {
             return reader.readObject();
         }

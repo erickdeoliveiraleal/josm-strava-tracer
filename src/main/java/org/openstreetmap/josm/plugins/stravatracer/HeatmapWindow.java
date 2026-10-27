@@ -8,18 +8,27 @@ import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.CookieHandler;
+import java.net.CookieManager;
+import java.net.CookieStore;
+import java.net.HttpCookie;
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.net.URL;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 
 import javax.imageio.ImageIO;
 
 import org.apache.commons.jcs3.engine.behavior.ICacheElement;
 import org.openstreetmap.gui.jmapviewer.tilesources.AbstractTMSTileSource;
+import org.openstreetmap.gui.jmapviewer.tilesources.TemplatedTMSTileSource;
 import org.openstreetmap.josm.data.cache.BufferedImageCacheEntry;
 import org.openstreetmap.josm.data.cache.CacheEntryAttributes;
 import org.openstreetmap.josm.data.coor.LatLon;
@@ -88,8 +97,7 @@ public final class HeatmapWindow {
         BufferedImage[][] tiles = new BufferedImage[size][size];
         List<String> log = new ArrayList<>();
         log.add("URL template: " + withoutQuery(info.getUrl()) + " (hot palette: " + hot + ")");
-        log.add("Cookies: " + (info.getCookies() == null || info.getCookies().isEmpty() ? "none" : "yes")
-                + ", custom headers: " + info.getCustomHttpHeaders().keySet());
+        log.add("HTTP headers: " + headers(info, source).keySet());
         int tileSize = -1;
         for (int j = 0; j < size; j++) {
             for (int i = 0; i < size; i++) {
@@ -168,10 +176,11 @@ public final class HeatmapWindow {
         return levels;
     }
 
-    /** Removes the query string, which may contain credentials. */
+    /** Removes the query string and the headers of a URL template, which may contain credentials. */
     static String withoutQuery(String url) {
-        int q = url.indexOf('?');
-        return q < 0 ? url : url.substring(0, q) + "?...";
+        String result = url.replaceAll("\\{header\\(([^,)]*),[^}]*\\}", "{header($1,...)}");
+        int q = result.indexOf('?');
+        return q < 0 ? result : result.substring(0, q) + "?...";
     }
 
     /**
@@ -222,37 +231,114 @@ public final class HeatmapWindow {
         } catch (IOException | RuntimeException e) {
             Logging.trace(e);
         }
-        return cachedDownload(info, url, log);
+        return cachedDownload(headers(info, source), url, log);
+    }
+
+    /**
+     * Returns the HTTP headers that JOSM sends for the tiles of a layer: the custom headers and cookies of
+     * the imagery, and the headers written in its URL template ({@code {header(Cookie,...)}}), which is how
+     * the Strava heatmap browser extensions pass the credentials.
+     * @param info imagery of the layer
+     * @param source tile source of the layer
+     * @return the headers
+     */
+    static Map<String, String> headers(ImageryInfo info, AbstractTMSTileSource source) {
+        Map<String, String> headers = new LinkedHashMap<>(info.getCustomHttpHeaders());
+        if (source instanceof TemplatedTMSTileSource) {
+            headers.putAll(((TemplatedTMSTileSource) source).getHeaders());
+        }
+        if (info.getCookies() != null && !info.getCookies().isEmpty()) {
+            headers.put("Cookie", info.getCookies());
+        }
+        return headers;
     }
 
     /**
      * Downloads a tile, or returns it from the cache when it was downloaded recently.
-     * @param info imagery of the Strava layer (its cookies and HTTP headers are reused)
+     * @param headers HTTP headers of the layer
      * @param url tile URL
      * @param log receives the download log
      * @return the tile image, or {@code null} for a tile without activity (HTTP 404, 410 or 204)
      * @throws IOException if the tile cannot be downloaded
      */
-    public static BufferedImage cachedDownload(ImageryInfo info, String url, List<String> log) throws IOException {
+    private static BufferedImage cachedDownload(Map<String, String> headers, String url, List<String> log)
+            throws IOException {
         synchronized (TILE_CACHE) {
             if (TILE_CACHE.containsKey(url)) {
                 return TILE_CACHE.get(url);
             }
         }
-        BufferedImage image = download(info, url, log);
+        BufferedImage image = download(headers, url, log);
         synchronized (TILE_CACHE) {
             TILE_CACHE.put(url, image);     // null for the tiles without activity
         }
         return image;
     }
 
-    private static BufferedImage download(ImageryInfo info, String url, List<String> log) throws IOException {
-        HttpClient client = HttpClient.create(new URL(url));
-        for (Map.Entry<String, String> header : info.getCustomHttpHeaders().entrySet()) {
-            client.setHeader(header.getKey(), header.getValue());
+    private static BufferedImage download(Map<String, String> headers, String url, List<String> log)
+            throws IOException {
+        // The credentials of the layer replace those kept by JOSM's cookie store
+        forgetStoredCookies(url, headers.get("Cookie"), false);
+        try {
+            return connect(headers, url, log);
+        } catch (AccessRefusedException e) {
+            // Cookies set by earlier responses (for example with the previous URL of the layer) live in JOSM's
+            // cookie store until it is restarted: retry once without them
+            if (forgetStoredCookies(url, headers.get("Cookie"), true)) {
+                log.add("   retry without the cookies kept by JOSM");
+                return connect(headers, url, log);
+            }
+            throw e;
         }
-        if (info.getCookies() != null && !info.getCookies().isEmpty()) {
-            client.setHeader("Cookie", info.getCookies());
+    }
+
+    /** HTTP 401 or 403. */
+    private static final class AccessRefusedException extends IOException {
+        private static final long serialVersionUID = 1L;
+
+        AccessRefusedException(String message) {
+            super(message);
+        }
+    }
+
+    /**
+     * Removes cookies from the cookie store that JOSM installs for all its HTTP connections, which keeps the
+     * cookies set by the responses until JOSM is restarted.
+     * @param url tile URL
+     * @param layerCookies cookies of the layer ("name=value; name=value"), may be {@code null}
+     * @param all {@code true} to remove all the cookies of the host, {@code false} only those of the layer
+     * @return {@code true} if cookies were removed
+     */
+    static boolean forgetStoredCookies(String url, String layerCookies, boolean all) {
+        if (!(CookieHandler.getDefault() instanceof CookieManager)) {
+            return false;
+        }
+        Set<String> names = new HashSet<>();
+        if (layerCookies != null) {
+            for (String pair : layerCookies.split(";")) {
+                int eq = pair.indexOf('=');
+                names.add((eq < 0 ? pair : pair.substring(0, eq)).trim());
+            }
+        }
+        boolean removed = false;
+        try {
+            CookieStore store = ((CookieManager) CookieHandler.getDefault()).getCookieStore();
+            for (HttpCookie cookie : store.get(new URI(url))) {
+                if (all || names.contains(cookie.getName())) {
+                    removed |= store.remove(null, cookie);
+                }
+            }
+        } catch (URISyntaxException | RuntimeException e) {
+            Logging.trace(e);
+        }
+        return removed;
+    }
+
+    private static BufferedImage connect(Map<String, String> headers, String url, List<String> log)
+            throws IOException {
+        HttpClient client = HttpClient.create(new URL(url));
+        for (Map.Entry<String, String> header : headers.entrySet()) {
+            client.setHeader(header.getKey(), header.getValue());
         }
         try {
             HttpClient.Response response = client.connect();
@@ -262,7 +348,7 @@ public final class HeatmapWindow {
                 return null;     // No activity in this tile
             }
             if (code == 401 || code == 403) {
-                throw new IOException(tr("Access to the Strava heatmap was refused (HTTP {0}). "
+                throw new AccessRefusedException(tr("Access to the Strava heatmap was refused (HTTP {0}). "
                         + "The cookies of the imagery layer may have expired.", code));
             }
             if (code != 200) {
