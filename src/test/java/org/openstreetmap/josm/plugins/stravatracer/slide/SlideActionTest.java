@@ -238,6 +238,68 @@ class SlideActionTest {
         assertEquals(nodes, path.getNodes());
     }
 
+    /** A trace of the click mode, off the trail by a few pixels, is moved onto it; its junction stays. */
+    @Test
+    void newLineIsSlidOntoTheTrail() {
+        int tx = 12704;
+        int ty = 17698;
+        float[] density = new float[512 * 512];
+        for (int x = 0; x < 512; x++) {
+            for (int dy = -2; dy <= 2; dy++) {
+                density[(256 + dy) * 512 + x] = (float) ((dy == 0 ? 200 : Math.abs(dy) == 1 ? 140 : 60) / 255.0);
+            }
+        }
+        List<SlideAlgorithm.Tile> tiles = new ArrayList<>();
+        for (int x = tx - 1; x <= tx + 1; x++) {
+            for (int y = ty - 1; y <= ty + 1; y++) {
+                tiles.add(new SlideAlgorithm.Tile(Z, x, y, 512, 512, y == ty ? density : new float[512 * 512]));
+            }
+        }
+        double baseX = tx * 512.0;
+        double baseY = ty * 512 + 256.5;
+        List<double[]> locations = new ArrayList<>();
+        for (int i = 0; i <= 8; i++) {
+            // A trace drawn 5 pixels (20 m) beside the most visible trail, wavy
+            locations.add(SlideAlgorithm.unproject(new double[] {baseX + 60 + i * 45,
+                baseY + (i == 0 || i == 8 || i == 4 ? 0 : 5 + (i % 2) * 2)}, Z));
+        }
+        SlideRaster raster = SlideAlgorithm.createHeatmapRaster(tiles, Z, SlideTiles.bounds(locations));
+        List<double[]> slid = SlideNewLine.slide(raster, locations, Set.of(4), new ArrayList<>());
+        assertTrue(slid != locations, "not slid");
+        boolean junction = false;
+        for (double[] loc : slid) {
+            assertEquals(baseY, SlideAlgorithm.project(loc, Z)[1], 1.0, "point off the trail");
+            junction |= loc[0] == locations.get(4)[0] && loc[1] == locations.get(4)[1];
+        }
+        assertTrue(junction, "the junction moved");
+        assertEquals(locations.get(0)[0], slid.get(0)[0], 0.0);
+    }
+
+    /** A 32 km diagonal road (like way 31577541, 75 million pixels at once) is slid in sections. */
+    @Test
+    void veryLongLinesAreSplitIntoSections() throws Exception {
+        List<double[]> locations = new ArrayList<>();
+        for (int i = 0; i < 380; i++) {
+            locations.add(new double[] {-49.30 + i * 0.0006, -16.20 + i * 0.0007 + (i % 2) * 0.0001});
+        }
+        Set<Integer> fixed = new java.util.HashSet<>(List.of(0, 379, 120));
+        List<int[]> sections = SlideTiles.sections(locations, fixed);
+        assertTrue(sections.size() > 1, "one section");
+        assertEquals(0, sections.get(0)[0]);
+        assertEquals(379, sections.get(sections.size() - 1)[1]);
+        for (int s = 0; s < sections.size(); s++) {
+            int[] section = sections.get(s);
+            assertTrue(section[1] > section[0]);
+            if (s > 0) {
+                assertEquals(sections.get(s - 1)[1], section[0], "sections share their end vertex");
+            }
+            SlideAlgorithm.Bounds b = SlideTiles.bounds(locations.subList(section[0], section[1] + 1));
+            assertTrue((long) (b.maxX - b.minX + 1) * (b.maxY - b.minY + 1) <= SlideAlgorithm.MAX_RASTER_PIXELS);
+        }
+        // A short line is one section, slid as the original does
+        assertEquals(1, SlideTiles.sections(locations.subList(0, 20), fixed).size());
+    }
+
     @Test
     void longLinesAreRefusedOnlyWithoutEnoughMemory() throws Exception {
         // A 17 km diagonal road: 72 tiles, 15 million pixels (refused by the original, at 16 tiles)

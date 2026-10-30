@@ -118,16 +118,52 @@ public final class TraceBuilder {
      */
     public static Command build(DataSet ds, Collection<Way> ways, List<List<Point>> lines, HeatmapWindow window,
             double snapMeters, Map<String, String> tags, List<Way> created) {
+        return buildGeographic(ds, ways, toLatLon(lines, window), window, snapMeters, tags, created);
+    }
+
+    /**
+     * Converts the extracted polylines from window pixels to coordinates. A junction shared by several
+     * lines is the same point in all of them, and gets equal coordinates.
+     * @param lines extracted polylines (window pixels)
+     * @param window heatmap window
+     * @return the polylines
+     */
+    public static List<List<LatLon>> toLatLon(List<List<Point>> lines, HeatmapWindow window) {
+        List<List<LatLon>> result = new ArrayList<>();
+        for (List<Point> line : lines) {
+            List<LatLon> coordinates = new ArrayList<>();
+            for (Point p : line) {
+                coordinates.add(window.toLatLon(p.x, p.y));
+            }
+            result.add(coordinates);
+        }
+        return result;
+    }
+
+    /**
+     * Builds the command creating the traced ways, from polylines in coordinates (after Slide).
+     * Points with equal coordinates in several lines are junctions.
+     * @param ds target data set
+     * @param ways existing ways around the window
+     * @param lines polylines
+     * @param window heatmap window
+     * @param snapMeters maximum distance between a free end of a trace and an existing way
+     * @param tags tags of the new ways
+     * @param created receives the created ways
+     * @return the command, or {@code null} if there is nothing to create
+     */
+    public static Command buildGeographic(DataSet ds, Collection<Way> ways, List<List<LatLon>> lines,
+            HeatmapWindow window, double snapMeters, Map<String, String> tags, List<Way> created) {
         List<Command> commands = new ArrayList<>();
         // A junction is the end of a line, and either the end or an inner point of the other lines
-        Map<Point, Node> sharedNodes = new HashMap<>();
-        Map<Point, Integer> occurrences = new HashMap<>();
-        for (List<Point> line : lines) {
+        Map<LatLon, Node> sharedNodes = new HashMap<>();
+        Map<LatLon, Integer> occurrences = new HashMap<>();
+        for (List<LatLon> line : lines) {
             sharedNodes.put(line.get(0), null);
             sharedNodes.put(line.get(line.size() - 1), null);
         }
-        for (List<Point> line : lines) {
-            for (Point p : new HashSet<>(line)) {
+        for (List<LatLon> line : lines) {
+            for (LatLon p : new HashSet<>(line)) {
                 if (sharedNodes.containsKey(p)) {
                     occurrences.merge(p, 1, Integer::sum);
                 }
@@ -143,17 +179,17 @@ public final class TraceBuilder {
             }
         }
 
-        for (List<Point> line : lines) {
+        for (List<LatLon> line : lines) {
             if (line.size() < 2) {
                 continue;
             }
             List<Node> nodes = new ArrayList<>();
             for (int i = 0; i < line.size(); i++) {
-                Point p = line.get(i);
+                LatLon p = line.get(i);
                 boolean shared = sharedNodes.containsKey(p);
                 Node node = shared ? sharedNodes.get(p) : null;
                 if (node == null) {
-                    node = new Node(window.toLatLon(p.x, p.y));
+                    node = new Node(p);
                     commands.add(new AddCommand(ds, node));
                     if (shared) {
                         sharedNodes.put(p, node);

@@ -32,6 +32,8 @@ public final class SlideTiles {
     public static final int MAX_TILES = 144;
     /** Bytes per raster pixel at the peak of a run (raster, masked copy, tracking surface, buffers). */
     static final long BYTES_PER_PIXEL = 28;
+    /** Smallest raster allowed for a section, whatever the memory (about 110 MB at the peak). */
+    static final long MIN_SECTION_PIXELS = 4_000_000;
 
     /** The downloaded tiles and the padded pixel area around the line. */
     public static final class Loaded {
@@ -59,11 +61,8 @@ public final class SlideTiles {
     public static Loaded load(ImageryInfo info, List<double[]> locations, BooleanSupplier cancelled,
             DoubleConsumer onProgress) throws IOException {
         int zoom = SLIDE_ZOOM;
-        // Pad the line's bounding box by the widest search radius plus the contrast neighbourhood.
-        double padding = Math.ceil((SlideAlgorithm.MAX_SEARCH_RADIUS_METERS + SlideAlgorithm.CONTRAST_RADIUS_METERS)
-                / SlideAlgorithm.metersPerPixel(locations.get(0)[1], zoom)) + 3;
-        SlideAlgorithm.Bounds bounds = SlideAlgorithm.lineBounds(locations, zoom, padding);
-        long pixels = (long) (bounds.maxX - bounds.minX + 1) * (bounds.maxY - bounds.minY + 1);
+        SlideAlgorithm.Bounds bounds = bounds(locations);
+        long pixels = pixels(bounds);
         if (pixels > SlideAlgorithm.MAX_RASTER_PIXELS) {
             throw new IOException(tr("Slide area is too large. Select a shorter section of the line."));
         }
@@ -71,7 +70,7 @@ public final class SlideTiles {
         int maxX = Math.floorDiv(bounds.maxX, 512);
         int minY = Math.floorDiv(bounds.minY, 512);
         int maxY = Math.floorDiv(bounds.maxY, 512);
-        int count = (maxX - minX + 1) * (maxY - minY + 1);
+        int count = tiles(bounds);
         if (count > MAX_TILES) {
             throw new IOException(tr("Slide needs too many tiles. Select a shorter section of the line."));
         }
@@ -106,6 +105,110 @@ public final class SlideTiles {
         return new Loaded(new ArrayList<>(tiles), bounds);
     }
 
+    /** The line's bounding box, padded by the widest search radius plus the contrast neighbourhood. */
+    static SlideAlgorithm.Bounds bounds(List<double[]> locations) {
+        double padding = Math.ceil((SlideAlgorithm.MAX_SEARCH_RADIUS_METERS + SlideAlgorithm.CONTRAST_RADIUS_METERS)
+                / SlideAlgorithm.metersPerPixel(locations.get(0)[1], SLIDE_ZOOM)) + 3;
+        return SlideAlgorithm.lineBounds(locations, SLIDE_ZOOM, padding);
+    }
+
+    private static long pixels(SlideAlgorithm.Bounds bounds) {
+        return (long) (bounds.maxX - bounds.minX + 1) * (bounds.maxY - bounds.minY + 1);
+    }
+
+    private static int tiles(SlideAlgorithm.Bounds bounds) {
+        return (Math.floorDiv(bounds.maxX, 512) - Math.floorDiv(bounds.minX, 512) + 1)
+                * (Math.floorDiv(bounds.maxY, 512) - Math.floorDiv(bounds.minY, 512) + 1);
+    }
+
+    private static boolean fits(List<double[]> locations, long maxPixels) {
+        SlideAlgorithm.Bounds bounds = bounds(locations);
+        return pixels(bounds) <= maxPixels && tiles(bounds) <= MAX_TILES;
+    }
+
+    /**
+     * Splits a line too long to slide at once into sections that fit, each one starting at the last vertex
+     * of the previous one. These shared vertices stay in place, like the ends of a selected range: the cut
+     * is made at a vertex that stays in place anyway (junction, tagged node) when there is one near the end
+     * of the section. A line that fits (and its memory) is a single section, slid as the original does.
+     * @param locations [lon, lat] vertices of the line
+     * @param fixed indices of the vertices that stay in place
+     * @return first and last vertex index of each section
+     * @throws IOException if two consecutive vertices are too far apart to fit in a section
+     */
+    public static List<int[]> sections(List<double[]> locations, java.util.Set<Integer> fixed) throws IOException {
+        SlideAlgorithm.Bounds whole = bounds(locations);
+        if (pixels(whole) <= SlideAlgorithm.MAX_RASTER_PIXELS && tiles(whole) <= MAX_TILES
+                && memoryNeeded(pixels(whole), tiles(whole)) <= availableMemory()) {
+            List<int[]> result = new ArrayList<>();
+            result.add(new int[] {0, locations.size() - 1});
+            return result;
+        }
+        // As large as the memory left allows (with a margin), so that there are as few sections as possible
+        long budget = availableMemory() * 3 / 4 - (long) MAX_TILES * 512 * 512 * 5;
+        long maxPixels = Math.max(MIN_SECTION_PIXELS, Math.min((long) SlideAlgorithm.MAX_RASTER_PIXELS,
+                budget / BYTES_PER_PIXEL));
+        List<int[]> result = sections(locations, fixed, maxPixels);
+        if (result == null) {
+            throw new IOException(tr("Two consecutive points of the line are too far apart to slide. "
+                    + "Add points between them."));
+        }
+        // Then the smallest size giving as many sections: sections of similar sizes, slid with less memory
+        long low = 1;
+        long high = maxPixels;
+        while (high - low > 100_000) {
+            long mid = (low + high) / 2;
+            List<int[]> candidate = sections(locations, fixed, mid);
+            if (candidate != null && candidate.size() <= result.size()) {
+                high = mid;
+            } else {
+                low = mid;
+            }
+        }
+        List<int[]> balanced = sections(locations, fixed, high);
+        return balanced != null && balanced.size() <= result.size() ? balanced : result;
+    }
+
+    /**
+     * Cuts the line greedily into sections of at most maxPixels.
+     * @return the sections, or {@code null} if two consecutive vertices do not fit in one
+     */
+    private static List<int[]> sections(List<double[]> locations, java.util.Set<Integer> fixed, long maxPixels) {
+        int last = locations.size() - 1;
+        List<int[]> result = new ArrayList<>();
+        int first = 0;
+        while (first < last) {
+            int end = first + 1;
+            if (!fits(locations.subList(first, end + 1), maxPixels)) {
+                return null;
+            }
+            while (end < last && fits(locations.subList(first, end + 2), maxPixels)) {
+                end++;
+            }
+            if (end < last) {
+                for (int i = end; i > first + (end - first) * 2 / 3; i--) {
+                    if (fixed.contains(i)) {
+                        end = i;
+                        break;
+                    }
+                }
+            }
+            result.add(new int[] {first, end});
+            first = end;
+        }
+        return result;
+    }
+
+    private static long memoryNeeded(long pixels, int tiles) {
+        // Raster arrays, plus the decoded tiles (float densities and cached images)
+        return pixels * BYTES_PER_PIXEL + (long) tiles * 512 * 512 * 5;
+    }
+
+    private static long availableMemory() {
+        Runtime runtime = Runtime.getRuntime();
+        return runtime.maxMemory() - (runtime.totalMemory() - runtime.freeMemory());
+    }
+
     /**
      * Checks that the run fits in the memory left to JOSM, so that a long line fails with a clear message
      * instead of an OutOfMemoryError.
@@ -114,13 +217,11 @@ public final class SlideTiles {
      * @throws IOException if there is not enough memory
      */
     static void checkMemory(long pixels, int tiles) throws IOException {
-        // Raster arrays, plus the decoded tiles (float densities and cached images)
-        long needed = pixels * BYTES_PER_PIXEL + (long) tiles * 512 * 512 * 5;
-        Runtime runtime = Runtime.getRuntime();
-        long available = runtime.maxMemory() - (runtime.totalMemory() - runtime.freeMemory());
+        long needed = memoryNeeded(pixels, tiles);
+        long available = availableMemory();
         if (needed > available) {
             System.gc();
-            available = runtime.maxMemory() - (runtime.totalMemory() - runtime.freeMemory());
+            available = availableMemory();
         }
         if (needed > available) {
             throw new IOException(tr("Not enough memory to slide such a long line at once (about {0} MB needed, "

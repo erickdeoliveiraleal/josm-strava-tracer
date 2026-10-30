@@ -10,9 +10,11 @@ import java.awt.event.MouseEvent;
 import java.awt.geom.Point2D;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import javax.swing.JOptionPane;
@@ -35,6 +37,9 @@ import org.openstreetmap.josm.gui.layer.AbstractTileSourceLayer;
 import org.openstreetmap.josm.gui.layer.Layer;
 import org.openstreetmap.josm.gui.layer.OsmDataLayer;
 import org.openstreetmap.josm.gui.util.GuiHelper;
+import org.openstreetmap.josm.plugins.stravatracer.slide.SlideAction;
+import org.openstreetmap.josm.plugins.stravatracer.slide.SlideAlgorithm;
+import org.openstreetmap.josm.plugins.stravatracer.slide.SlideNewLine;
 import org.openstreetmap.josm.tools.Logging;
 import org.openstreetmap.josm.tools.Shortcut;
 
@@ -65,6 +70,8 @@ public class StravaTraceMode extends MapMode {
     public static final StringProperty TAGS = new StringProperty("stravatracer.tags", "highway=path");
     /** Writes the diagnostic files after each click, not only when no trace is found. */
     public static final BooleanProperty DEBUG = new BooleanProperty("stravatracer.debug", false);
+    /** Align the traces along the heatmap with Slide before creating them. */
+    public static final BooleanProperty SLIDE = new BooleanProperty("stravatracer.slide", true);
 
     private final AtomicBoolean running = new AtomicBoolean();
 
@@ -186,18 +193,86 @@ public class StravaTraceMode extends MapMode {
             }
         }
 
+        List<List<LatLon>> traced = TraceBuilder.toLatLon(lines, window);
+        if (SLIDE.get()) {
+            traced = slide(ds, info, traced);
+        }
+
         HeatmapWindow finalWindow = window;
         List<Way> finalWays = ways;
-        List<List<Point>> finalLines = lines;
+        List<List<LatLon>> finalLines = traced;
         GuiHelper.runInEDT(() -> {
             List<Way> created = new ArrayList<>();
-            Command cmd = TraceBuilder.build(ds, finalWays, finalLines, finalWindow, SNAP.get(),
+            Command cmd = TraceBuilder.buildGeographic(ds, finalWays, finalLines, finalWindow, SNAP.get(),
                     parseTags(TAGS.get()), created);
             if (cmd != null) {
                 UndoRedoHandler.getInstance().add(cmd);
                 ds.setSelected(created);
             }
         });
+    }
+
+    /**
+     * Aligns the traces along the heatmap with Slide, which follows the strongest trail around each line.
+     * The junctions between the traces stay in place, so that they stay connected. A trace that Slide
+     * cannot align is kept as traced.
+     */
+    private static List<List<LatLon>> slide(DataSet ds, ImageryInfo info, List<List<LatLon>> lines) {
+        // Junctions: the ends of the lines, wherever they appear
+        Set<LatLon> junctions = new HashSet<>();
+        double minLat = Double.POSITIVE_INFINITY;
+        double minLon = Double.POSITIVE_INFINITY;
+        double maxLat = Double.NEGATIVE_INFINITY;
+        double maxLon = Double.NEGATIVE_INFINITY;
+        for (List<LatLon> line : lines) {
+            junctions.add(line.get(0));
+            junctions.add(line.get(line.size() - 1));
+            for (LatLon p : line) {
+                minLat = Math.min(minLat, p.lat());
+                maxLat = Math.max(maxLat, p.lat());
+                minLon = Math.min(minLon, p.lon());
+                maxLon = Math.max(maxLon, p.lon());
+            }
+        }
+        // Other roads and paths near the traces: their heat is theirs
+        List<List<double[]>> others = new ArrayList<>();
+        double pad = SlideAlgorithm.MAX_SEARCH_RADIUS_METERS / 111320;
+        double padLon = pad / Math.cos(Math.toRadians((minLat + maxLat) / 2));
+        ds.getReadLock().lock();
+        try {
+            for (Way other : ds.searchWays(new BBox(minLon - padLon, minLat - pad, maxLon + padLon, maxLat + pad))) {
+                if (other.isUsable() && SlideAction.isHighway(other)) {
+                    others.add(SlideAction.geometry(other));
+                }
+            }
+        } finally {
+            ds.getReadLock().unlock();
+        }
+        List<List<LatLon>> result = new ArrayList<>();
+        for (List<LatLon> line : lines) {
+            List<double[]> locations = new ArrayList<>();
+            Set<Integer> fixed = new HashSet<>();
+            for (int i = 0; i < line.size(); i++) {
+                locations.add(new double[] {line.get(i).lon(), line.get(i).lat()});
+                if (junctions.contains(line.get(i))) {
+                    fixed.add(i);
+                }
+            }
+            List<LatLon> slid = line;
+            try {
+                List<double[]> aligned = SlideNewLine.slide(info, locations, fixed, others);
+                if (aligned != locations) {
+                    slid = new ArrayList<>();
+                    for (double[] loc : aligned) {
+                        slid.add(new LatLon(loc[1], loc[0]));
+                    }
+                }
+            } catch (IOException | RuntimeException e) {
+                Logging.warn("Strava tracer: the trace is kept as traced, Slide failed: " + e);
+            }
+            result.add(slid);
+        }
+        return result;
     }
 
     /** Tells if a trace ends near the border of the window, and so is probably cut. */

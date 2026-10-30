@@ -26,9 +26,10 @@ The plugin can also be downloaded from the [releases](https://github.com/erickde
    - masks a band around the ways already in the data layer (`highway`, `railway`, `leisure=track`, `route=ferry`, `aeroway=runway|taxiway`);
    - starting from the hottest pixel near the click, takes the connected trace with a threshold **relative to the popularity of the clicked trace** (rarely and heavily used traces work with the same settings), jumping over small gaps;
    - **follows the trace** at its free ends: looks for the continuation in a cone ahead, up to 12 px, to cross the broken parts of rarely used traces;
-   - thins it down to a one pixel line (Zhang-Suen), splits it into lines, removes the short branches (GPS noise) and **joins the branches continuing each other** into a single way; simplifies it (Douglas-Peucker);
+   - thins it down to a one pixel line (Zhang-Suen), splits it into lines, removes the short branches (GPS noise, but never a branch reaching an existing way) and **joins the branches continuing each other** into a single way: at a fork, the two branches much hotter than the others, even through a bend, or else the straightest ones; simplifies it (Douglas-Peucker);
    - creates **only the clicked trace**: the traces branching from it can be clicked afterwards, one by one, and get connected to the first one;
    - if the trace reaches the border of the downloaded tiles, **downloads more tiles** and traces again (up to 7×7 tiles);
+   - **aligns each trace with Slide** (see below), which follows the strongest trail around the line: the junctions between the traces stay in place, and a trace Slide cannot align is kept as traced (`stravatracer.slide=false` turns this off);
    - creates the ways with the configured tags, sharing the node at the junctions;
    - connects each free end to the nearest existing way: reuses a node closer than 3 m, or inserts a new node in the way.
 4. Everything is a single command: **Ctrl+Z undoes it**. The created ways are selected, so that you can review them and complete their tags.
@@ -50,7 +51,7 @@ The way is refitted onto the centre of the trail: every vertex is snapped to the
 - the vertices that became useless are deleted, unless tagged or used elsewhere; Slide's own points are removed first;
 - sliding a settled line again leaves it unchanged.
 
-Everything is a single command: Ctrl+Z undoes it. Slide uses the zoom 15 tiles of the Strava layer (with the zoom 14 tile where a zoom 15 tile is missing) and works on up to 1000 points and 144 tiles (the original allows 16, a limit made for a browser tab: a 17 km diagonal road needs about 72 tiles and 400 MB of memory, and slides in a few seconds plus the download). When JOSM has not enough memory left, Slide says so before downloading; bridges and tunnels are not moved, and the layer must have no imagery offset.
+Everything is a single command: Ctrl+Z undoes it. Slide uses the zoom 15 tiles of the Strava layer (with the zoom 14 tile where a zoom 15 tile is missing) and works on up to 144 tiles at once (the original allows 16, a limit made for a browser tab: a 17 km diagonal road needs about 72 tiles and 400 MB of memory, and slides in a few seconds plus the download). A longer line is slid in sections of similar sizes, as large as the memory left to JOSM allows (a 32 km diagonal road takes 2 sections); the vertex shared by two sections stays in place, preferably a junction or a tagged node. Bridges and tunnels are not moved, and the layer must have no imagery offset.
 
 The Java port follows the original function by function. `src/test/slide-diff` checks it: `generate.py` writes test cases (synthetic and real heatmap tiles, rough lines, junctions, protected nodes, coverage holes…), `run-js.mjs` runs the original JavaScript on them (`upstream/`, v0.15.0) and `SlideDifferentialTest` checks that the Java port gives the same raster (bit for bit) and the same lines.
 
@@ -85,6 +86,7 @@ Edit them in *Preferences → Advanced*:
 | `stravatracer.branches` | `false` | Also create the traces branching from the clicked one |
 | `stravatracer.simplify` | `1.0` | Simplification tolerance (pixels) |
 | `stravatracer.tags` | `highway=path` | Tags of the new ways (`k=v;k=v`) |
+| `stravatracer.slide` | `true` | Align the traces with Slide before creating them |
 | `stravatracer.debug` | `false` | Write the diagnostics after each click, not only when no trace is found |
 
 When no trace is found, the plugin writes to `<JOSM user data directory>/stravatracer-debug/` the tiles (`tiles.png`), the intensities (`intensity.png`: mask in blue, pixels above the threshold in red) and an `info.txt` file with the HTTP responses (without cookies nor query string) and the most frequent colours around the click.

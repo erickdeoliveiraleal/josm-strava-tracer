@@ -177,4 +177,35 @@ class TraceExtractorTest {
         }
         return false;
     }
+
+    /**
+     * A popular trace bends at a faint fork, then reaches a mapped road after a short stretch: the trace
+     * follows the popular trail to the road, instead of turning into the faint branch (seen at
+     * -15.4535, -49.4368).
+     */
+    @Test
+    void popularTraceIsFollowedAtAFaintForkUpToTheRoad() {
+        // A long popular trail, then a short stretch (less than a tenth of it) turning by about 60 degrees
+        int[][] strong = heatmap(230, 7, new int[] {330, 0, 260, 400, 235, 410, 226, 418});
+        int[][] faint = heatmap(70, 3, new int[] {260, 400, 300, 405, 420, 330});
+        int[][] intensity = new int[SIZE][SIZE];
+        boolean[][] road = new boolean[SIZE][SIZE];
+        for (int y = 0; y < SIZE; y++) {
+            for (int x = 0; x < SIZE; x++) {
+                intensity[y][x] = Math.max(strong[y][x], faint[y][x]);
+                road[y][x] = y >= 421;     // The mapped road, masked
+            }
+        }
+        List<List<Point>> lines = TraceExtractor.extract(intensity, road, 300, 170, new TraceExtractor.Params());
+        assertEquals(1, lines.size());
+        List<Point> line = lines.get(0);
+        Point top = line.get(0).y < line.get(line.size() - 1).y ? line.get(0) : line.get(line.size() - 1);
+        Point bottom = top == line.get(0) ? line.get(line.size() - 1) : line.get(0);
+        assertTrue(top.y < 20, "top end " + top);
+        // Down to the road, not into the faint branch
+        assertTrue(bottom.y > 405 && bottom.x < 245, "bottom end " + bottom);
+        for (Point p : line) {
+            assertTrue(p.y < 395 || p.x < 270, "the trace turns into the faint branch at " + p);
+        }
+    }
 }

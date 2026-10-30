@@ -108,7 +108,7 @@ public final class TraceExtractor {
             }
             lines = centreLines(region, blocked, params);
         }
-        lines = joinContinuations(lines, params.maxTurnAngle);
+        lines = joinContinuations(lines, params.maxTurnAngle, intensity);
         if (!params.branches && lines.size() > 1) {
             // Only the trace under the click: the other ones can be clicked afterwards
             List<Point> clicked = null;
@@ -187,7 +187,7 @@ public final class TraceExtractor {
         int width = skeletonLength == 0 ? 0 : area / skeletonLength;
         // Back to window coordinates (the points of the junctions are shared by several lines)
         List<List<Point>> lines = new ArrayList<>();
-        for (List<Point> line : polylines(skeleton, Math.max(params.spurLength, 2 * width))) {
+        for (List<Point> line : polylines(skeleton, Math.max(params.spurLength, 2 * width), cropBlocked)) {
             List<Point> translated = new ArrayList<>(line.size());
             for (Point p : line) {
                 translated.add(new Point(p.x + x0, p.y + y0));
@@ -467,8 +467,17 @@ public final class TraceExtractor {
         return Math.abs(DX[a] - DX[b]) <= 1 && Math.abs(DY[a] - DY[b]) <= 1;
     }
 
-    /** Splits a one pixel wide skeleton into polylines between end points and junctions. */
-    static List<List<Point>> polylines(boolean[][] skel, int spurLength) {
+    /** Distance (in pixels) from an existing way at which a free end is considered connected to it. */
+    private static final int CONNECTION_DISTANCE = 4;
+
+    /**
+     * Splits a one pixel wide skeleton into polylines between end points and junctions.
+     * @param skel skeleton
+     * @param spurLength minimum length of a branch ending in the void
+     * @param blocked pixels of the existing ways, may be {@code null}: a branch ending against them connects
+     *        the trace to an existing way, and is kept however short it is
+     */
+    static List<List<Point>> polylines(boolean[][] skel, int spurLength, boolean[][] blocked) {
         Set<Point> pixels = new HashSet<>();
         for (int y = 0; y < skel.length; y++) {
             for (int x = 0; x < skel[0].length; x++) {
@@ -535,7 +544,10 @@ public final class TraceExtractor {
             double minLength = Math.max(spurLength, MIN_BRANCH_RATIO * longest);
             List<List<Point>> kept = new ArrayList<>();
             for (List<Point> line : result) {
-                boolean dangling = degree.get(line.get(0)) == 1 || degree.get(line.get(line.size() - 1)) == 1;
+                Point start = line.get(0);
+                Point end = line.get(line.size() - 1);
+                boolean dangling = degree.get(start) == 1 && !nearBlocked(blocked, start)
+                        || degree.get(end) == 1 && !nearBlocked(blocked, end);
                 if (!dangling || length(line) >= minLength) {
                     kept.add(line);
                 }
@@ -550,6 +562,23 @@ public final class TraceExtractor {
         return result;
     }
 
+    /** Tells if a pixel is close to an existing way. */
+    private static boolean nearBlocked(boolean[][] blocked, Point p) {
+        if (blocked == null) {
+            return false;
+        }
+        for (int dy = -CONNECTION_DISTANCE; dy <= CONNECTION_DISTANCE; dy++) {
+            for (int dx = -CONNECTION_DISTANCE; dx <= CONNECTION_DISTANCE; dx++) {
+                int x = p.x + dx;
+                int y = p.y + dy;
+                if (y >= 0 && y < blocked.length && x >= 0 && x < blocked[0].length && blocked[y][x]) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
     private static double length(List<Point> line) {
         double length = 0;
         for (int i = 1; i < line.size(); i++) {
@@ -558,11 +587,22 @@ public final class TraceExtractor {
         return length;
     }
 
+    /** Maximum turn (in degrees) between the two dominant branches of a junction joined as a single way. */
+    private static final double MAX_DOMINANT_TURN_ANGLE = 90;
+    /** The other branches of a junction must be at most this part as hot as the two dominant ones. */
+    private static final double DOMINANCE_RATIO = 0.5;
+    /** Number of pixels of a branch, from the junction, over which its heat is measured. */
+    private static final int HEAT_PIXELS = 20;
+
     /**
      * At each junction, joins the pairs of branches that continue each other, so that a trace crossed
-     * or touched by another one remains a single line.
+     * or touched by another one remains a single line: the two branches much hotter than the others
+     * (a popular trace bending at a faint fork), or else the two straightest ones.
+     * @param input polylines (pixel chains)
+     * @param maxTurnAngle maximum deviation (in degrees) between two branches continuing each other
+     * @param intensity heatmap intensities, may be {@code null} to only look at the angles
      */
-    static List<List<Point>> joinContinuations(List<List<Point>> input, double maxTurnAngle) {
+    static List<List<Point>> joinContinuations(List<List<Point>> input, double maxTurnAngle, int[][] intensity) {
         List<List<Point>> lines = new ArrayList<>();
         for (List<Point> line : input) {
             lines.add(new ArrayList<>(line));
@@ -586,6 +626,12 @@ public final class TraceExtractor {
             for (List<int[]> inc : incidences.values()) {
                 if (inc.size() < 3) {
                     continue;
+                }
+                int[][] dominant = dominantPair(lines, inc, intensity);
+                if (dominant != null) {
+                    bestA = dominant[0];
+                    bestB = dominant[1];
+                    break;
                 }
                 for (int a = 0; a < inc.size(); a++) {
                     for (int b = a + 1; b < inc.size(); b++) {
@@ -615,6 +661,45 @@ public final class TraceExtractor {
             }
         }
         return lines;
+    }
+
+    /**
+     * Returns the two branches of a junction that are much hotter than the other ones, if they continue
+     * each other with a turn below {@link #MAX_DOMINANT_TURN_ANGLE}, or {@code null}.
+     */
+    private static int[][] dominantPair(List<List<Point>> lines, List<int[]> inc, int[][] intensity) {
+        if (intensity == null) {
+            return null;
+        }
+        Integer[] order = new Integer[inc.size()];
+        double[] heat = new double[inc.size()];
+        for (int k = 0; k < inc.size(); k++) {
+            order[k] = k;
+            heat[k] = heat(lines.get(inc.get(k)[0]), inc.get(k)[1] == 0, intensity);
+        }
+        Arrays.sort(order, (a, b) -> Double.compare(heat[b], heat[a]));
+        int[] a = inc.get(order[0]);
+        int[] b = inc.get(order[1]);
+        if (a[0] == b[0] || heat[order[2]] > DOMINANCE_RATIO * heat[order[1]]) {
+            return null;
+        }
+        double[] da = direction(lines.get(a[0]), a[1] == 0);
+        double[] db = direction(lines.get(b[0]), b[1] == 0);
+        if (da[0] * db[0] + da[1] * db[1] >= -Math.cos(Math.toRadians(MAX_DOMINANT_TURN_ANGLE))) {
+            return null;
+        }
+        return new int[][] {a, b};
+    }
+
+    /** Mean intensity of the first pixels of a line, from one of its ends. */
+    private static double heat(List<Point> line, boolean fromStart, int[][] intensity) {
+        int n = Math.min(HEAT_PIXELS, line.size());
+        double sum = 0;
+        for (int i = 0; i < n; i++) {
+            Point p = line.get(fromStart ? i : line.size() - 1 - i);
+            sum += intensity[p.y][p.x];
+        }
+        return sum / n;
     }
 
     /** Unit vector from an end of a line towards a point about 8 pixels along it. */

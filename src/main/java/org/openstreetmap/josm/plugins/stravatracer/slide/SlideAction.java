@@ -10,6 +10,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
@@ -137,11 +138,13 @@ public class SlideAction extends JosmAction {
         return false;
     }
 
-    private static boolean isHighway(Way way) {
+    /** Tells if a way is a road or path, whose heat is its own. */
+    public static boolean isHighway(Way way) {
         return way.hasKey("highway");
     }
 
-    private static List<double[]> geometry(Way way) {
+    /** Returns the [lon, lat] vertices of a way. */
+    public static List<double[]> geometry(Way way) {
         List<double[]> locs = new ArrayList<>();
         for (Node n : way.getNodes()) {
             if (n.isLatLonKnown()) {
@@ -221,6 +224,9 @@ public class SlideAction extends JosmAction {
         private List<SlideAlgorithm.Tile> tiles;
         private final List<SlideDebug.OtherWay> debugWays = new ArrayList<>();
         private final List<List<Integer>> debugNodeOthers = new ArrayList<>();
+        private int sectionCount = 1;
+        /** Index of the first vertex of the section being slid. */
+        private int sectionStart;
 
         SlideTask(DataSet ds, Target target, ImageryInfo info) {
             super(tr("Slide along Strava heatmap"), false);
@@ -290,25 +296,37 @@ public class SlideAction extends JosmAction {
                 } finally {
                     ds.getReadLock().unlock();
                 }
-                getProgressMonitor().setTicksCount(100);
-                getProgressMonitor().subTask(tr("Loading heatmap…"));
-                SlideTiles.Loaded loaded = SlideTiles.load(info, locations, () -> cancelled,
-                        v -> getProgressMonitor().setTicks((int) (v * 35)));
-                getProgressMonitor().subTask(tr("Following heatmap density…"));
-                tiles = loaded.tiles;
-                SlideRaster raster = SlideAlgorithm.createHeatmapRaster(loaded.tiles, SlideTiles.SLIDE_ZOOM,
-                        loaded.bounds);
-                SlideAlgorithm.Options options = new SlideAlgorithm.Options();
-                // The line's first and last points stay where they were drawn too.
-                options.fixedIndices.add(0);
-                options.fixedIndices.add(locations.size() - 1);
-                options.fixedIndices.addAll(SlideCleanup.fixedIndices(selection));
-                options.otherWays = others;
-                options.cancelled = () -> cancelled;
-                options.onProgress = v -> getProgressMonitor().setTicks(35 + (int) (v * 65));
-                Result slid = SlideAlgorithm.slideLineTwice(locations, raster, options);
-                result = SlideCleanup.cleanSlideResult(selection, slid);
-                result.skipped = slid.skipped;
+                getProgressMonitor().setTicksCount(1000);
+                SlideCleanup.Selection whole = selection;
+                Set<Integer> fixed = new LinkedHashSet<>();
+                fixed.add(0);
+                fixed.add(locations.size() - 1);
+                fixed.addAll(SlideCleanup.fixedIndices(whole));
+                // A line too long for one raster is slid section by section
+                List<int[]> sections = SlideTiles.sections(locations, fixed);
+                sectionCount = sections.size();
+                Result merged = new Result();
+                for (int s = 0; s < sectionCount; s++) {
+                    int first = sections.get(s)[0];
+                    int last = sections.get(s)[1];
+                    sectionStart = first;
+                    selection = sectionCount == 1 ? whole : new SlideCleanup.Selection(
+                            whole.nodes.subList(first, last + 1), whole.start + first, whole.start + last,
+                            whole.wayNodeCount);
+                    Result part = slide(locations.subList(first, last + 1), others, s);
+                    for (Record r : part) {
+                        if (r.nodeIndex != null) {
+                            r.nodeIndex += first;
+                        }
+                    }
+                    // The first point of a section is the last one of the previous section
+                    merged.addAll(s == 0 ? part : part.subList(1, part.size()));
+                    merged.skipped += part.skipped;
+                    merged.alongOther += part.alongOther;
+                }
+                selection = whole;
+                sectionStart = 0;
+                result = merged;
             } catch (SlideAlgorithm.CancelledException e) {
                 cancelled = true;
             } catch (SlideAlgorithm.NoSignalException | IOException | IllegalArgumentException e) {
@@ -320,14 +338,45 @@ public class SlideAction extends JosmAction {
             }
         }
 
+        /** Slides one section of the line (the whole line when it fits in one raster). */
+        private Result slide(List<double[]> locations, List<List<double[]>> others, int section)
+                throws IOException {
+            int base = 1000 * section / sectionCount;
+            int share = 1000 / sectionCount;
+            getProgressMonitor().subTask(sectionCount == 1 ? tr("Loading heatmap…")
+                    : tr("Section {0} of {1}: loading heatmap…", section + 1, sectionCount));
+            SlideTiles.Loaded loaded = SlideTiles.load(info, locations, () -> cancelled,
+                    v -> getProgressMonitor().setTicks(base + (int) (v * 0.35 * share)));
+            getProgressMonitor().subTask(sectionCount == 1 ? tr("Following heatmap density…")
+                    : tr("Section {0} of {1}: following heatmap density…", section + 1, sectionCount));
+            tiles = loaded.tiles;
+            SlideRaster raster = SlideAlgorithm.createHeatmapRaster(loaded.tiles, SlideTiles.SLIDE_ZOOM,
+                    loaded.bounds);
+            SlideAlgorithm.Options options = new SlideAlgorithm.Options();
+            // The line's first and last points stay where they were drawn too.
+            options.fixedIndices.add(0);
+            options.fixedIndices.add(locations.size() - 1);
+            options.fixedIndices.addAll(SlideCleanup.fixedIndices(selection));
+            options.otherWays = others;
+            options.cancelled = () -> cancelled;
+            options.onProgress = v -> getProgressMonitor().setTicks(base + (int) ((0.35 + v * 0.65) * share));
+            Result slid = SlideAlgorithm.slideLineTwice(locations, raster, options);
+            Result cleaned = SlideCleanup.cleanSlideResult(selection, slid);
+            cleaned.skipped = slid.skipped;
+            return cleaned;
+        }
+
         /** Writes the run as a test case, and returns a sentence telling where, or an empty string. */
         private String dump(String message) {
-            if (selection == null || tiles == null) {
+            // The tiles kept are those of the current section: a merged result of several sections is not dumped
+            if (selection == null || tiles == null || (sectionCount > 1 && selection.nodes.size() == target.nodes.size())) {
                 return "";
             }
             try {
-                return "<br>" + tr("Diagnostics: {0}",
-                        SlideDebug.write(message, tiles, selection, debugNodeOthers, debugWays, result).getPath());
+                List<List<Integer>> nodeOthers = debugNodeOthers.subList(sectionStart,
+                        sectionStart + selection.nodes.size());
+                return "<br>" + tr("Diagnostics: {0}", SlideDebug.write(message, tiles, selection, nodeOthers,
+                        debugWays, sectionCount > 1 ? null : result).getPath());
             } catch (IOException | RuntimeException e) {
                 Logging.warn(e);
                 return "";
