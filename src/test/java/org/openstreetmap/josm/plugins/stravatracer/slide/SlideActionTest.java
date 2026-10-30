@@ -275,6 +275,33 @@ class SlideActionTest {
         assertEquals(locations.get(0)[0], slid.get(0)[0], 0.0);
     }
 
+    /** Only the parts of the band along the line that were not downloaded yet are requested. */
+    @Test
+    void downloadAlongRequestsOnlyWhatIsMissing() {
+        List<org.openstreetmap.josm.data.coor.LatLon> line = List.of(
+                new org.openstreetmap.josm.data.coor.LatLon(-15.45, -49.46),
+                new org.openstreetmap.josm.data.coor.LatLon(-15.45, -49.40));    // 6.4 km to the east
+        DataSet ds = new DataSet();
+        List<org.openstreetmap.josm.data.Bounds> missing = DownloadAlong.missing(ds, line, 100);
+        assertEquals(1, missing.size(), "a straight 6 km band of 200 m is a single request");
+        for (org.openstreetmap.josm.data.Bounds b : missing) {
+            assertTrue(b.getArea() <= DownloadAlong.MAX_REQUEST_AREA + 1e-12);
+            assertTrue(b.contains(new org.openstreetmap.josm.data.coor.LatLon(-15.45, b.getCenter().lon())));
+        }
+        // The western half is downloaded: only the eastern half is requested
+        ds.addDataSource(new org.openstreetmap.josm.data.DataSource(
+                new org.openstreetmap.josm.data.Bounds(-15.46, -49.47, -15.44, -49.43), "test"));
+        missing = DownloadAlong.missing(ds, line, 100);
+        assertTrue(!missing.isEmpty());
+        for (org.openstreetmap.josm.data.Bounds b : missing) {
+            assertTrue(b.getMinLon() >= -49.4301, "already downloaded: " + b);
+        }
+        // All of it: nothing to download
+        ds.addDataSource(new org.openstreetmap.josm.data.DataSource(
+                new org.openstreetmap.josm.data.Bounds(-15.46, -49.44, -15.44, -49.39), "test"));
+        assertTrue(DownloadAlong.missing(ds, line, 100).isEmpty());
+    }
+
     /** A 32 km diagonal road (like way 31577541, 75 million pixels at once) is slid in sections. */
     @Test
     void veryLongLinesAreSplitIntoSections() throws Exception {

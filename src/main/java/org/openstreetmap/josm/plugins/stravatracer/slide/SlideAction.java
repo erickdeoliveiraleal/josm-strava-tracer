@@ -18,26 +18,34 @@ import java.util.Set;
 import javax.swing.JOptionPane;
 
 import org.openstreetmap.josm.actions.JosmAction;
+import org.openstreetmap.josm.actions.downloadtasks.DownloadOsmTask;
+import org.openstreetmap.josm.actions.downloadtasks.DownloadParams;
 import org.openstreetmap.josm.command.AddCommand;
 import org.openstreetmap.josm.command.ChangeNodesCommand;
 import org.openstreetmap.josm.command.Command;
 import org.openstreetmap.josm.command.DeleteCommand;
 import org.openstreetmap.josm.command.MoveCommand;
 import org.openstreetmap.josm.command.SequenceCommand;
+import org.openstreetmap.josm.data.Bounds;
 import org.openstreetmap.josm.data.UndoRedoHandler;
 import org.openstreetmap.josm.data.coor.LatLon;
 import org.openstreetmap.josm.data.imagery.ImageryInfo;
 import org.openstreetmap.josm.data.osm.BBox;
 import org.openstreetmap.josm.data.osm.DataSet;
+import org.openstreetmap.josm.data.osm.DownloadPolicy;
 import org.openstreetmap.josm.data.osm.Node;
 import org.openstreetmap.josm.data.osm.OsmPrimitive;
 import org.openstreetmap.josm.data.osm.Relation;
 import org.openstreetmap.josm.data.osm.Way;
+import org.openstreetmap.josm.data.preferences.BooleanProperty;
+import org.openstreetmap.josm.data.preferences.DoubleProperty;
 import org.openstreetmap.josm.gui.MainApplication;
 import org.openstreetmap.josm.gui.Notification;
 import org.openstreetmap.josm.gui.PleaseWaitRunnable;
 import org.openstreetmap.josm.gui.layer.AbstractTileSourceLayer;
 import org.openstreetmap.josm.gui.util.GuiHelper;
+import org.openstreetmap.josm.io.NetworkManager;
+import org.openstreetmap.josm.io.OnlineResource;
 import org.openstreetmap.josm.plugins.stravatracer.StravaLayers;
 import org.openstreetmap.josm.plugins.stravatracer.slide.SlideAlgorithm.Record;
 import org.openstreetmap.josm.plugins.stravatracer.slide.SlideAlgorithm.Result;
@@ -51,6 +59,14 @@ import org.openstreetmap.josm.tools.Shortcut;
 public class SlideAction extends JosmAction {
 
     private static final long serialVersionUID = 1L;
+
+    /** Download the data along the line before sliding it, where it was not downloaded yet. */
+    public static final BooleanProperty DOWNLOAD = new BooleanProperty("stravatracer.slide.download", false);
+    /** Half width (m) of the band downloaded along the line. */
+    public static final DoubleProperty DOWNLOAD_DISTANCE = new DoubleProperty("stravatracer.slide.download.distance",
+            50);
+    /** Most download requests made along one line. */
+    private static final int MAX_DOWNLOADS = 40;
 
     private volatile boolean busy;
 
@@ -174,6 +190,10 @@ public class SlideAction extends JosmAction {
 
     @Override
     public void actionPerformed(ActionEvent e) {
+        start(true);
+    }
+
+    private void start(boolean download) {
         DataSet ds = getLayerManager().getEditDataSet();
         if (ds == null || ds.isLocked() || busy) {
             return;
@@ -205,8 +225,46 @@ public class SlideAction extends JosmAction {
             notify(tr("Reset the offset of the Strava heatmap layer before sliding."));
             return;
         }
+        if (download && DOWNLOAD.get() && downloadAlong(ds, target)) {
+            return;
+        }
         busy = true;
         MainApplication.worker.submit(new SlideTask(ds, target, layer.getInfo()));
+    }
+
+    /**
+     * Downloads the parts of the band along the line that are not in the data set yet, then slides the
+     * selection again.
+     * @return {@code true} if downloads were started (Slide follows them), {@code false} if there is
+     *         nothing to download (or it cannot be)
+     */
+    private boolean downloadAlong(DataSet ds, Target target) {
+        if (ds.getDownloadPolicy() == DownloadPolicy.BLOCKED || NetworkManager.isOffline(OnlineResource.OSM_API)) {
+            return false;
+        }
+        List<LatLon> line = new ArrayList<>();
+        for (Node n : target.nodes) {
+            line.add(n.getCoor());
+        }
+        List<Bounds> missing = DownloadAlong.missing(ds, line, DOWNLOAD_DISTANCE.get());
+        if (missing.isEmpty()) {
+            return false;
+        }
+        if (missing.size() > MAX_DOWNLOADS) {
+            notify(tr("The band along the line is too large to download ({0} requests). "
+                    + "Sliding with the data already downloaded.", missing.size()));
+            return false;
+        }
+        busy = true;
+        for (Bounds bounds : missing) {
+            new DownloadOsmTask().download(new DownloadParams(), bounds, null);
+        }
+        // The downloads run in the worker thread: Slide starts once they are merged into the layer
+        MainApplication.worker.submit(() -> GuiHelper.runInEDT(() -> {
+            busy = false;
+            start(false);
+        }));
+        return true;
     }
 
     /** Background part: tiles, raster and fit; then the edit in the EDT. */

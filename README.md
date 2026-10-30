@@ -53,6 +53,8 @@ The way is refitted onto the centre of the trail: every vertex is snapped to the
 
 Everything is a single command: Ctrl+Z undoes it. Slide uses the zoom 15 tiles of the Strava layer (with the zoom 14 tile where a zoom 15 tile is missing) and works on up to 144 tiles at once (the original allows 16, a limit made for a browser tab: a 17 km diagonal road needs about 72 tiles and 400 MB of memory, and slides in a few seconds plus the download). A longer line is slid in sections of similar sizes, as large as the memory left to JOSM allows (a 32 km diagonal road takes 2 sections); the vertex shared by two sections stays in place, preferably a junction or a tagged node. Bridges and tunnels are not moved, and the layer must have no imagery offset.
 
+Slide uses the roads and paths near the line, and the ways connected to it, as they are in the data layer. With `stravatracer.slide.download=true`, it first downloads the data in a band along the line (like *File → Download along*), but only the parts of the band that were not downloaded yet: when the whole band is already in the layer, nothing is downloaded.
+
 The Java port follows the original function by function. `src/test/slide-diff` checks it: `generate.py` writes test cases (synthetic and real heatmap tiles, rough lines, junctions, protected nodes, coverage holes…), `run-js.mjs` runs the original JavaScript on them (`upstream/`, v0.15.0) and `SlideDifferentialTest` checks that the Java port gives the same raster (bit for bit) and the same lines.
 
 ```bash
@@ -87,6 +89,8 @@ Edit them in *Preferences → Advanced*:
 | `stravatracer.simplify` | `1.0` | Simplification tolerance (pixels) |
 | `stravatracer.tags` | `highway=path` | Tags of the new ways (`k=v;k=v`) |
 | `stravatracer.slide` | `true` | Align the traces with Slide before creating them |
+| `stravatracer.slide.download` | `false` | Download the data along the line before sliding it (only where it was not downloaded yet) |
+| `stravatracer.slide.download.distance` | `50` | Half width (m) of the band downloaded along the line |
 | `stravatracer.debug` | `false` | Write the diagnostics after each click, not only when no trace is found |
 
 When no trace is found, the plugin writes to `<JOSM user data directory>/stravatracer-debug/` the tiles (`tiles.png`), the intensities (`intensity.png`: mask in blue, pixels above the threshold in red) and an `info.txt` file with the HTTP responses (without cookies nor query string) and the most frequent colours around the click.
