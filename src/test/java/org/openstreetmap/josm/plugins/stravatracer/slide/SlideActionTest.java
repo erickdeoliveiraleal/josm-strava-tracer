@@ -66,6 +66,24 @@ class SlideActionTest {
     }
 
     @Test
+    void keepStableKeepsTheTipOfASpike() {
+        // The old line goes out to a spike (1) and back; the slid line comes back along it before reaching the tip
+        List<double[]> locations = List.of(new double[] {0, 0}, new double[] {0.0005, 0.0005},
+                new double[] {0, 0.0008}, new double[] {0, 0.002});
+        List<SlideAlgorithm.Record> result = List.of(new SlideAlgorithm.Record(new double[] {0.0003, -0.0001}, 0),
+                new SlideAlgorithm.Record(new double[] {0.00001, 0.0008}, null),
+                new SlideAlgorithm.Record(locations.get(1), 1), new SlideAlgorithm.Record(locations.get(2), 2),
+                new SlideAlgorithm.Record(locations.get(3), 3));
+        List<Integer> kept = new ArrayList<>();
+        for (SlideAlgorithm.Record r : SlideAlgorithm.keepStable(locations, result)) {
+            if (r.nodeIndex != null) {
+                kept.add(r.nodeIndex);
+            }
+        }
+        assertEquals(List.of(0, 1, 2, 3), kept);
+    }
+
+    @Test
     void selectionOfAWayOrOfARange() {
         DataSet ds = new DataSet();
         List<Node> nodes = new ArrayList<>();

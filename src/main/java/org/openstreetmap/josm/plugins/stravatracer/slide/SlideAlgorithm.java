@@ -1870,8 +1870,15 @@ public final class SlideAlgorithm {
             }
             List<Integer> old = new ArrayList<>();
             if (close) {
+                // The run can go back along the old line (a spike of it): its whole extent, not only its ends
+                double from = Double.POSITIVE_INFINITY;
+                double to = Double.NEGATIVE_INFINITY;
+                for (int k = a; k <= b; k++) {
+                    from = Math.min(from, onP[k].s);
+                    to = Math.max(to, onP[k].s);
+                }
                 for (int i = 0; i < pLine.size(); i++) {
-                    if (along[i] >= onP[a].s - 1e-6 && along[i] <= onP[b].s + 1e-6) {
+                    if (along[i] >= from - 1e-6 && along[i] <= to + 1e-6) {
                         old.add(i);
                     }
                 }
