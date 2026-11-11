@@ -207,6 +207,7 @@ class SlideDifferentialTest {
                 failures.add(name + ": fixed indices " + fixed + " instead of " + expectedFixed);
             }
             SlideAlgorithm.Options options = new SlideAlgorithm.Options();
+            options.original = true;
             options.fixedIndices = fixed;
             for (JsonValue o : otherWays) {
                 if (o.asJsonObject().getBoolean("highway")) {

@@ -35,12 +35,12 @@ public final class SlideNewLine {
         }
         SlideTiles.Loaded loaded = SlideTiles.load(info, locations, () -> false, null);
         return slide(SlideAlgorithm.createHeatmapRaster(loaded.tiles, SlideTiles.SLIDE_ZOOM, loaded.bounds),
-                locations, fixed, otherWays);
+                locations, fixed, otherWays, SlideAction.SIMPLIFY.get());
     }
 
-    /** Slides a line on a raster of the heatmap around it. */
+    /** Slides a line on a raster of the heatmap around it, and simplifies it with a tolerance in metres. */
     static List<double[]> slide(SlideRaster raster, List<double[]> locations, Set<Integer> fixed,
-            List<List<double[]>> otherWays) {
+            List<List<double[]>> otherWays, double simplifyMeters) {
         SlideAlgorithm.Options options = new SlideAlgorithm.Options();
         options.fixedIndices.add(0);
         options.fixedIndices.add(locations.size() - 1);
@@ -52,7 +52,11 @@ public final class SlideNewLine {
         } catch (SlideAlgorithm.NoSignalException e) {
             return locations;
         }
-        return valid(slid, locations, options.fixedIndices) ? locations(slid) : locations;
+        if (!valid(slid, locations, options.fixedIndices)) {
+            return locations;
+        }
+        return locations(SlideSimplify.simplify(SlideFolds.remove(slid, options.fixedIndices), options.fixedIndices,
+                simplifyMeters));
     }
 
     /** Tells if the fixed vertices are all kept, in order and in place (as the Slide action checks). */

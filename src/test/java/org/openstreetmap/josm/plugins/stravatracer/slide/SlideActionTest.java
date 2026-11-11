@@ -66,6 +66,60 @@ class SlideActionTest {
     }
 
     @Test
+    void slidLineIsSimplifiedKeepingJunctions() {
+        // A straight line with a point every 0.5 m (about 5.5e-6 degrees), and a bend of 5 m at its end
+        List<double[]> locations = List.of(new double[] {0, 0}, new double[] {0.0002, 0.000003},
+                new double[] {0.0004, 0}, new double[] {0.0006, 0.00005});
+        List<SlideAlgorithm.Record> records = new ArrayList<>();
+        for (int i = 0; i <= 108; i++) {
+            Integer nodeIndex = i % 36 == 0 ? Integer.valueOf(i / 36) : null;
+            double[] loc = nodeIndex != null && nodeIndex != 1 ? locations.get(nodeIndex)
+                    : new double[] {i * 0.0004 / 72, i <= 72 ? 0 : (i - 72) * 0.00005 / 36};
+            records.add(new SlideAlgorithm.Record(loc, nodeIndex));
+        }
+        // 1 and 2 have no role: only the ends and the bend at 2 are left
+        List<Integer> kept = new ArrayList<>();
+        SlideAlgorithm.Result simplified = SlideSimplify.simplify(records, Set.of(), 1);
+        for (SlideAlgorithm.Record r : simplified) {
+            kept.add(r.nodeIndex);
+        }
+        assertEquals(java.util.Arrays.asList(0, 2, 3), kept);
+        // A junction stays even when it is moved; no tolerance keeps everything
+        assertEquals(4, SlideSimplify.simplify(records, Set.of(1), 1).size());
+        assertEquals(records.size(), SlideSimplify.simplify(records, Set.of(), 0).size());
+    }
+
+    /** A line in metres (x east, y north) near the equator, as records of new points. */
+    private static List<SlideAlgorithm.Record> metres(double... xy) {
+        List<SlideAlgorithm.Record> line = new ArrayList<>();
+        for (int i = 0; i < xy.length; i += 2) {
+            line.add(new SlideAlgorithm.Record(new double[] {xy[i] / 111_320, xy[i + 1] / 110_540},
+                    i == 0 ? Integer.valueOf(0) : i == xy.length - 2 ? Integer.valueOf(1) : null));
+        }
+        return line;
+    }
+
+    @Test
+    void foldsOfTheSlidLineAreRemoved() {
+        // Along the trail, back 20 m over it, and on again
+        List<SlideAlgorithm.Record> backAndForth = metres(0, 0, 30, 0, 40, 0.5, 20, 0, 25, 0.3, 45, 0, 80, 0);
+        List<Double> xs = new ArrayList<>();
+        for (SlideAlgorithm.Record r : SlideFolds.remove(backAndForth, Set.of())) {
+            xs.add((double) Math.round(r.loc[0] * 111_320));
+        }
+        for (int i = 1; i < xs.size(); i++) {
+            assertTrue(xs.get(i) > xs.get(i - 1), "the line goes back: " + xs);
+        }
+        // A spike with a short leg
+        assertEquals(3, SlideFolds.remove(metres(0, 0, 30, 0, 27, 0.2, 60, 0), Set.of()).size());
+        // A hairpin with legs 15 m apart, and a loop of 120 m, are kept
+        List<SlideAlgorithm.Record> hairpin = metres(0, 0, 40, 0, 50, 7, 40, 15, 0, 15);
+        assertEquals(hairpin.size(), SlideFolds.remove(hairpin, Set.of()).size());
+        List<SlideAlgorithm.Record> loop = metres(0, 0, 30, 0, 60, 0, 60, 30, 30, 30, 30, 1, 30, -20);
+        assertEquals(loop.size(), SlideFolds.remove(loop, Set.of()).size());
+    }
+
+    @Test
     void keepStableKeepsTheTipOfASpike() {
         // The old line goes out to a spike (1) and back; the slid line comes back along it before reaching the tip
         List<double[]> locations = List.of(new double[] {0, 0}, new double[] {0.0005, 0.0005},
@@ -282,7 +336,7 @@ class SlideActionTest {
                 baseY + (i == 0 || i == 8 || i == 4 ? 0 : 5 + (i % 2) * 2)}, Z));
         }
         SlideRaster raster = SlideAlgorithm.createHeatmapRaster(tiles, Z, SlideTiles.bounds(locations));
-        List<double[]> slid = SlideNewLine.slide(raster, locations, Set.of(4), new ArrayList<>());
+        List<double[]> slid = SlideNewLine.slide(raster, locations, Set.of(4), new ArrayList<>(), 0);
         assertTrue(slid != locations, "not slid");
         boolean junction = false;
         for (double[] loc : slid) {
@@ -291,6 +345,83 @@ class SlideActionTest {
         }
         assertTrue(junction, "the junction moved");
         assertEquals(locations.get(0)[0], slid.get(0)[0], 0.0);
+    }
+
+    @Test
+    void lineIsNotSnappedToAFaintTraceNextToTheTrail() {
+        int tx = 12704;
+        int ty = 17698;
+        // The trail, and 15 pixels beside it a faint trace (6 % of its heat) that local contrast brings up
+        float[] density = new float[512 * 512];
+        for (int x = 0; x < 512; x++) {
+            for (int dy = -2; dy <= 2; dy++) {
+                density[(256 + dy) * 512 + x] = (float) ((dy == 0 ? 200 : Math.abs(dy) == 1 ? 140 : 60) / 255.0);
+                density[(271 + dy) * 512 + x] = (float) ((dy == 0 ? 12 : Math.abs(dy) == 1 ? 8 : 4) / 255.0);
+            }
+        }
+        List<SlideAlgorithm.Tile> tiles = new ArrayList<>();
+        for (int x = tx - 1; x <= tx + 1; x++) {
+            for (int y = ty - 1; y <= ty + 1; y++) {
+                tiles.add(new SlideAlgorithm.Tile(Z, x, y, 512, 512, y == ty ? density : new float[512 * 512]));
+            }
+        }
+        double baseX = tx * 512.0;
+        double baseY = ty * 512 + 256.5;
+        List<double[]> locations = new ArrayList<>();
+        for (int i = 0; i <= 8; i++) {
+            // Drawn 11 pixels (25 m) beside the trail, 4 pixels from the faint trace
+            locations.add(SlideAlgorithm.unproject(new double[] {baseX + 60 + i * 45, baseY + (i == 0 || i == 8 ? 0 : 11)},
+                    Z));
+        }
+        SlideRaster raster = SlideAlgorithm.createHeatmapRaster(tiles, Z, SlideTiles.bounds(locations));
+        List<double[]> slid = SlideNewLine.slide(raster, locations, Set.of(), new ArrayList<>(), 0);
+        assertTrue(slid != locations, "not slid");
+        for (double[] loc : slid) {
+            assertEquals(baseY, SlideAlgorithm.project(loc, Z)[1], 1.0, "point off the trail");
+        }
+    }
+
+    @Test
+    void lineIsSlidUpToAJunctionWhereTheLastVertexFindsNoTrail() {
+        int tx = 12704;
+        int ty = 17698;
+        // A trail ending on a mapped road (vertical, at x = 420), whose heat is the road's
+        float[] density = new float[512 * 512];
+        for (int x = 0; x < 512; x++) {
+            for (int dy = -2; dy <= 2; dy++) {
+                float heat = (float) ((dy == 0 ? 200 : Math.abs(dy) == 1 ? 140 : 60) / 255.0);
+                if (x <= 420) {
+                    density[(256 + dy) * 512 + x] = heat;
+                }
+                density[x * 512 + 420 + dy] = Math.max(density[x * 512 + 420 + dy], heat);
+            }
+        }
+        List<SlideAlgorithm.Tile> tiles = new ArrayList<>();
+        for (int x = tx - 1; x <= tx + 1; x++) {
+            for (int y = ty - 1; y <= ty + 1; y++) {
+                tiles.add(new SlideAlgorithm.Tile(Z, x, y, 512, 512, y == ty ? density : new float[512 * 512]));
+            }
+        }
+        double baseX = tx * 512.0;
+        double baseY = ty * 512 + 256.5;
+        List<double[]> road = List.of(SlideAlgorithm.unproject(new double[] {baseX + 420.5, baseY - 200}, Z),
+                SlideAlgorithm.unproject(new double[] {baseX + 420.5, baseY}, Z),
+                SlideAlgorithm.unproject(new double[] {baseX + 420.5, baseY + 200}, Z));
+        List<double[]> locations = new ArrayList<>();
+        for (int i = 0; i <= 8; i++) {
+            // Drawn 5 pixels (11 m) beside the trail; the vertex before the junction is next to the road
+            double x = i == 8 ? 420.5 : i == 7 ? 416 : 60 + i * 50;
+            locations.add(SlideAlgorithm.unproject(new double[] {baseX + x, baseY + (i == 0 || i == 8 ? 0 : 5)}, Z));
+        }
+        SlideRaster raster = SlideAlgorithm.createHeatmapRaster(tiles, Z, SlideTiles.bounds(locations));
+        List<double[]> slid = SlideNewLine.slide(raster, locations, Set.of(), List.of(road), 0);
+        assertTrue(slid != locations, "not slid");
+        for (double[] loc : slid) {
+            double[] p = SlideAlgorithm.project(loc, Z);
+            if (p[0] < baseX + 360) {
+                assertEquals(baseY, p[1], 1.0, "point off the trail at x = " + (p[0] - baseX));
+            }
+        }
     }
 
     /** Only the parts of the band along the line that were not downloaded yet are requested. */

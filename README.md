@@ -51,11 +51,13 @@ The way is refitted onto the centre of the trail: every vertex is snapped to the
 - the vertices that became useless are deleted, unless tagged or used elsewhere; Slide's own points are removed first;
 - sliding a settled line again leaves it unchanged.
 
+Unlike the original, a vertex is never snapped to a faint trace (less than a tenth of the heat of the hottest trail across the line) that the local contrast brings up as high as the trail, and a vertex at a hook of the drawing, where the line across it runs along the trail, is searched all around: a stretch drawn 25 m beside the trail with a faint trace nearer is slid instead of left as drawn. Where a vertex finds no trail (often the one next to a junction, whose heat is the other road's), only its own neighbours may be left as drawn, not every vertex after them: a vertex traced on the trail from its other side stays on it. Where a rough trace has its vertices out of order along the trail, the slid line would run back and forth over itself: loops shorter than 50 m that come back within 2.5 m of the line, and spikes, are removed. The result is simplified to 1 m (`stravatracer.slide.simplify`), as the smoothing keeps a vertex every few metres in bends.
+
 Everything is a single command: Ctrl+Z undoes it. Slide uses the zoom 15 tiles of the Strava layer (with the zoom 14 tile where a zoom 15 tile is missing) and works on up to 144 tiles at once (the original allows 16, a limit made for a browser tab: a 17 km diagonal road needs about 72 tiles and 400 MB of memory, and slides in a few seconds plus the download). A longer line is slid in sections of similar sizes, as large as the memory left to JOSM allows (a 32 km diagonal road takes 2 sections); the vertex shared by two sections stays in place, preferably a junction or a tagged node. Bridges and tunnels are not moved, and the layer must have no imagery offset.
 
 Slide uses the roads and paths near the line, and the ways connected to it, as they are in the data layer. With `stravatracer.slide.download=true`, it first downloads the data in a band along the line (like *File → Download along*), but only the parts of the band that were not downloaded yet: when the whole band is already in the layer, nothing is downloaded.
 
-The Java port follows the original function by function. `src/test/slide-diff` checks it: `generate.py` writes test cases (synthetic and real heatmap tiles, rough lines, junctions, protected nodes, coverage holes…), `run-js.mjs` runs the original JavaScript on them (`upstream/`, v0.15.0) and `SlideDifferentialTest` checks that the Java port gives the same raster (bit for bit) and the same lines.
+The Java port follows the original function by function. `src/test/slide-diff` checks it: `generate.py` writes test cases (synthetic and real heatmap tiles, rough lines, junctions, protected nodes, coverage holes…), `run-js.mjs` runs the original JavaScript on them (`upstream/`, v0.15.0) and `SlideDifferentialTest` checks that the Java port gives the same raster (bit for bit) and the same lines (with these changes turned off).
 
 ```bash
 cd src/test/slide-diff
@@ -91,6 +93,7 @@ Edit them in *Preferences → Advanced*:
 | `stravatracer.slide` | `true` | Align the traces with Slide before creating them |
 | `stravatracer.slide.download` | `false` | Download the data along the line before sliding it (only where it was not downloaded yet) |
 | `stravatracer.slide.download.distance` | `50` | Half width (m) of the band downloaded along the line |
+| `stravatracer.slide.simplify` | `1.0` | Tolerance (m) of the simplification of the slid line; junctions, tagged nodes and relation members are kept; `0` keeps every vertex |
 | `stravatracer.debug` | `false` | Write the diagnostics after each click, not only when no trace is found |
 
 When no trace is found, the plugin writes to `<JOSM user data directory>/stravatracer-debug/` the tiles (`tiles.png`), the intensities (`intensity.png`: mask in blue, pixels above the threshold in red) and an `info.txt` file with the HTTP responses (without cookies nor query string) and the most frequent colours around the click.

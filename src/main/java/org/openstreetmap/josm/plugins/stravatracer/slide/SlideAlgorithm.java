@@ -137,6 +137,12 @@ public final class SlideAlgorithm {
         public Map<Integer, double[]> limitedOrigins;
         public Set<Integer> untracedSections = new LinkedHashSet<>();
         public boolean holdBends = true;
+        /**
+         * True: as the original. False (the default): vertices are not snapped to faint traces that the contrast
+         * normalisation brings up as high as the trail, a vertex at a hook of the drawing is searched all around,
+         * and a vertex held on the trail by a traced section is not left as drawn because of its other section.
+         */
+        public boolean original;
         public Double alignMeters;
         public Double searchRadiusMeters;
         public Double snapRadiusMeters;
@@ -159,6 +165,7 @@ public final class SlideAlgorithm {
             o.limitedOrigins = limitedOrigins;
             o.untracedSections = new LinkedHashSet<>(untracedSections);
             o.holdBends = holdBends;
+            o.original = original;
             o.alignMeters = alignMeters;
             o.searchRadiusMeters = searchRadiusMeters;
             o.snapRadiusMeters = snapRadiusMeters;
@@ -715,8 +722,37 @@ public final class SlideAlgorithm {
 
     static double[] snap(SlideRaster raster, double[] point, double radius, double[] normal, double align,
             double hold) {
+        return snap(raster, point, radius, normal, align, hold, null, 0);
+    }
+
+    // A ridge of the tracking surface below this share of the hottest heat across the line is a faint trace that
+    // the contrast normalisation brought up as high as the trail: vertices are not snapped to it.
+    static final double FAINT_SHARE = 0.1;
+
+    /** The least heat (of {@code heat}) a vertex may snap to: a share of the hottest heat across the line. */
+    static double faintHeat(SlideRaster heat, double[] point, double[] normal, double radius) {
+        if (normal == null) {
+            return 0;
+        }
+        double max = 0;
+        for (double d = -radius; d <= radius; d += 0.5) {
+            max = Math.max(max, sampleDensity(heat, new double[] {point[0] + normal[0] * d, point[1] + normal[1] * d}));
+        }
+        return max * FAINT_SHARE;
+    }
+
+    private static boolean faint(SlideRaster heat, double[] point, double minHeat) {
+        return heat != null && sampleDensity(heat, point) < minHeat;
+    }
+
+    /**
+     * Snaps a vertex to the trail, never to a point of {@code heat} below {@code minHeat}
+     * ({@code heat} null: no such limit, as the original).
+     */
+    static double[] snap(SlideRaster raster, double[] point, double radius, double[] normal, double align,
+            double hold, SlideRaster heat, double minHeat) {
         boolean startsNear = zone(raster, point) == 1;
-        if (normal != null && sampleDensity(raster, point) >= ON_TRAIL) {
+        if (normal != null && sampleDensity(raster, point) >= ON_TRAIL && !faint(heat, point, minHeat)) {
             double start = sampleDensity(raster, point);
             double[] peak = {start};
             double up1 = climb(raster, point, normal, 1, start, radius, align, startsNear, peak);
@@ -736,7 +772,7 @@ public final class SlideAlgorithm {
                 return point.clone();
             }
             double[] centred = {point[0] + normal[0] * offset, point[1] + normal[1] * offset};
-            if (sampleDensity(raster, centred) >= 0.25) {
+            if (sampleDensity(raster, centred) >= 0.25 && !faint(heat, centred, minHeat)) {
                 return centred;
             }
         }
@@ -754,7 +790,7 @@ public final class SlideAlgorithm {
                     continue;
                 }
                 double value = sampleDensity(raster, p);
-                if (value < 0.25 || (!startsNear && zone(raster, p) == 1)) {
+                if (value < 0.25 || (!startsNear && zone(raster, p) == 1) || faint(heat, p, minHeat)) {
                     continue;
                 }
                 double score = value - 0.12 * Math.pow(d / radius, 2);
@@ -777,7 +813,8 @@ public final class SlideAlgorithm {
                     continue;
                 }
                 // Filter candidates BEFORE applying the distance penalty.
-                if (raster.density[index] < 0.25 || (!startsNear && zone(raster, new double[] {x, y}) == 1)) {
+                if (raster.density[index] < 0.25 || (!startsNear && zone(raster, new double[] {x, y}) == 1)
+                        || faint(heat, new double[] {x, y}, minHeat)) {
                     continue;
                 }
                 double score = raster.density[index] - 0.12 * Math.pow(distance / radius, 2);
@@ -1308,12 +1345,19 @@ public final class SlideAlgorithm {
             checkAbort(options);
             double[] anchor = fixed.contains(i) ? originals.get(i) : null;
             List<Double> radii = limited.contains(i) ? Collections.singletonList(snapRadius) : snapSearches;
+            SlideRaster heat = options.original ? null : own;
+            double minHeat = anchor != null || heat == null ? 0
+                    : faintHeat(own, originals.get(i), normals.get(i), maxSnapMeters / scale);
             for (double r : radii) {
                 if (anchor != null) {
                     break;
                 }
                 anchor = snap(tracking, originals.get(i), r, normals.get(i), align,
-                        holds[i] ? HOLD_MAX_OFFSET_METERS / scale : 0);
+                        holds[i] ? HOLD_MAX_OFFSET_METERS / scale : 0, heat, minHeat);
+            }
+            if (anchor == null && heat != null && !limited.contains(i) && normals.get(i) != null) {
+                // At a hook of the drawing, the line across it can run along the trail: search around the vertex
+                anchor = snap(tracking, originals.get(i), snapRadius, null, align, 0, heat, minHeat);
             }
             // The limit is measured from where the vertex was before ANY pass.
             double[] origin = options.limitedOrigins != null ? options.limitedOrigins.get(i) : null;
@@ -1395,6 +1439,14 @@ public final class SlideAlgorithm {
                 }
                 for (int v : new int[] {i - 1, i}) {
                     if (fixed.contains(v) || unsnapped.contains(v)) {
+                        continue;
+                    }
+                    // Traced from its other neighbour, on the trail too, the vertex is on the trail: the drawn
+                    // section must not spread along the whole line
+                    int other = v == i - 1 ? i - 1 : i + 1;
+                    int neighbour = v == i - 1 ? v - 1 : v + 1;
+                    if (!options.original && other >= 1 && other < n && paths.get(other) != null
+                            && !unsnapped.contains(neighbour)) {
                         continue;
                     }
                     double dx = anchors.get(v)[0] - originals.get(v)[0];

@@ -65,6 +65,8 @@ public class SlideAction extends JosmAction {
     /** Half width (m) of the band downloaded along the line. */
     public static final DoubleProperty DOWNLOAD_DISTANCE = new DoubleProperty("stravatracer.slide.download.distance",
             50);
+    /** Largest distance (m) between the slid line and its simplified version; 0 keeps every vertex. */
+    public static final DoubleProperty SIMPLIFY = new DoubleProperty("stravatracer.slide.simplify", 1.0);
     /** Most download requests made along one line. */
     private static final int MAX_DOWNLOADS = 40;
 
@@ -421,7 +423,9 @@ public class SlideAction extends JosmAction {
             Result slid = SlideAlgorithm.slideLineTwice(locations, raster, options);
             Result cleaned = SlideCleanup.cleanSlideResult(selection, slid);
             cleaned.skipped = slid.skipped;
-            return cleaned;
+            Set<Integer> keep = new HashSet<>(options.fixedIndices);
+            keep.addAll(SlideCleanup.protectedIndices(selection));
+            return SlideSimplify.simplify(SlideFolds.remove(cleaned, keep), keep, SIMPLIFY.get());
         }
 
         /** Writes the run as a test case, and returns a sentence telling where, or an empty string. */
