@@ -66,6 +66,8 @@ public final class HeatmapWindow {
     private int[][] argb;
     /** Download log, for the diagnostics. */
     private final List<String> log = new ArrayList<>();
+    /** Number of tiles with activity (the others were missing: HTTP 404, 410 or 204). */
+    private int tileCount;
 
     HeatmapWindow(int zoom, int tileSize, long originX, long originY, int[][] intensity) {
         this.zoom = zoom;
@@ -140,6 +142,13 @@ public final class HeatmapWindow {
         }
         HeatmapWindow window = new HeatmapWindow(zoom, tileSize, (long) (centerX - radius) * tileSize,
                 (long) (centerY - radius) * tileSize, intensity);
+        for (BufferedImage[] row : tiles) {
+            for (BufferedImage tile : row) {
+                if (tile != null) {
+                    window.tileCount++;
+                }
+            }
+        }
         window.argb = argb;
         window.log.addAll(log);
         return window;
@@ -392,6 +401,11 @@ public final class HeatmapWindow {
     /** @return download log */
     public List<String> getLog() {
         return log;
+    }
+
+    /** @return number of tiles with activity; 0 when the server has no tile at all at this zoom */
+    public int getTileCount() {
+        return tileCount;
     }
 
     public int getZoom() {

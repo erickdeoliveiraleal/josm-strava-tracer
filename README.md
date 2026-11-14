@@ -70,7 +70,9 @@ The committed cases are synthetic. Real heatmap tiles can be used locally to com
 ## Requirements
 
 - JOSM 19613 or newer.
-- A visible TMS imagery layer whose name or URL contains `strava`, with a valid access (cookies). Any colour style of the heatmap works (hot, blue, bluered, purple, gray), as well as the new grey level tiles. Images in another format are converted from their colours ("hot" palette when the URL contains `/hot/`, grey levels otherwise).
+- A visible TMS imagery layer whose name or URL contains `strava`, `globalheat` or `heatmap` (or whose name contains the `stravatracer.layer` preference), with a valid access: the cookies of the Strava layer, or the HTTP headers of a proxy. Any colour style of the heatmap works (hot, blue, bluered, purple, gray), as well as the new grey level tiles. Images in another format are converted from their colours ("hot" palette when the URL contains `/hot/`, grey levels otherwise).
+
+A heatmap proxy works too, with its own HTTP headers. For example the Nakarte proxy, which needs no Strava account: in *Preferences → Imagery*, add a TMS layer with the URL `https://proxy.nakarte.me/https/content-a.strava.com/identified/globalheat/all/hot/{zoom}/{x}/{y}.png?px=256`, maximum zoom 16, and the custom HTTP header `referer` = `https://nakarte.me/` (press Enter after typing in each cell of the header table, or JOSM does not keep it). With `px=512` tiles, which stop at zoom 15, set the maximum zoom to 15; the plugin also falls back to the zoom below when a server has no tile at all at the zoom it asks for.
 
 The easiest way to get this layer is the [JOSM Strava Heatmap](https://github.com/zekefarwell/josm-strava-heatmap) browser extension: log in on [strava.com/heatmap](https://www.strava.com/heatmap), click its button, and it opens the heatmap layer in JOSM with the URL and cookies already set (JOSM remote control must be enabled). The Strava cookies expire frequently: when the plugin reports that the access was refused, open the layer again with the extension.
 
@@ -84,6 +86,7 @@ Edit them in *Preferences → Advanced*:
 | `stravatracer.relative` | `0.2` | Minimum intensity relative to the hottest pixel near the click (0–1). Increase it if the way leaks into the surrounding activity; decrease it if the way stops before the end |
 | `stravatracer.buffer` | `15` | Band (m) masked around the existing ways |
 | `stravatracer.snap` | `40` | Maximum distance (m) to connect a free end to an existing way |
+| `stravatracer.layer` | *(empty)* | Name (or part of the name) of the heatmap layer, for a layer that is not recognised from its name or URL. Empty: the topmost visible layer whose name or URL contains `strava`, `globalheat` or `heatmap` |
 | `stravatracer.zoom` | `16` | Maximum zoom level of the tiles (limited by the maximum zoom of the layer) |
 | `stravatracer.radius` | `1` | Tiles initially downloaded on each side of the clicked tile (1 = 3×3) |
 | `stravatracer.maxradius` | `3` | Maximum number of tiles on each side when the trace reaches the border (3 = 7×7) |
