@@ -56,8 +56,11 @@ public class StravaTraceMode extends MapMode {
     public static final DoubleProperty BUFFER = new DoubleProperty("stravatracer.buffer", 15);
     /** Maximum distance (in meters) between a free end of a trace and the way it is connected to. */
     public static final DoubleProperty SNAP = new DoubleProperty("stravatracer.snap", 40);
-    /** Zoom levels tried below the maximum when the server has no tile at all there. */
-    private static final int MAX_ZOOM_FALLBACKS = 2;
+    /**
+     * Lowest zoom tried when the server has no tile at all at the zoom asked for: 512 pixel tiles at zoom 15 have
+     * the resolution of 256 pixel tiles at zoom 16, and coarser tiles would give imprecise ways.
+     */
+    private static final int MIN_FALLBACK_ZOOM = 15;
     /** Maximum zoom level of the heatmap tiles. */
     public static final IntegerProperty MAX_ZOOM = new IntegerProperty("stravatracer.zoom", 16);
     /** Number of tiles downloaded on each side of the clicked tile. */
@@ -159,14 +162,12 @@ public class StravaTraceMode extends MapMode {
         int x;
         int y;
         int radius = RADIUS.get();
-        int fallbacks = 0;
         while (true) {
             window = HeatmapWindow.load(info, zoom, click, radius, DEBUG.get());
-            if (window.getTileCount() == 0 && fallbacks < MAX_ZOOM_FALLBACKS && zoom > 1) {
+            if (window.getTileCount() == 0 && zoom > MIN_FALLBACK_ZOOM) {
                 // No tile at all at this zoom: the server stops at a lower zoom than the layer says (512 pixel
-                // tiles stop at zoom 15, and proxies may stop earlier), so try the zoom below
+                // tiles stop at zoom 15), so try the zoom below
                 zoom--;
-                fallbacks++;
                 Logging.info("Strava tracer: no heatmap tile at zoom " + (zoom + 1) + ", trying zoom " + zoom);
                 continue;
             }
