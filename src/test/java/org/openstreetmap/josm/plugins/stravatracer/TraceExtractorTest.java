@@ -12,6 +12,7 @@ import java.awt.RenderingHints;
 import java.awt.image.BufferedImage;
 import java.awt.image.ConvolveOp;
 import java.awt.image.Kernel;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
 
@@ -206,6 +207,46 @@ class TraceExtractorTest {
         assertTrue(bottom.y > 405 && bottom.x < 245, "bottom end " + bottom);
         for (Point p : line) {
             assertTrue(p.y < 395 || p.x < 270, "the trace turns into the faint branch at " + p);
+        }
+    }
+
+    /** A pixel chain through the given vertices. */
+    private static List<Point> chain(int... xy) {
+        List<Point> line = new ArrayList<>();
+        line.add(new Point(xy[0], xy[1]));
+        for (int k = 2; k < xy.length; k += 2) {
+            int steps = Math.max(Math.abs(xy[k] - xy[k - 2]), Math.abs(xy[k + 1] - xy[k - 1]));
+            for (int s = 1; s <= steps; s++) {
+                line.add(new Point(xy[k - 2] + Math.round((float) (xy[k] - xy[k - 2]) * s / steps),
+                        xy[k - 1] + Math.round((float) (xy[k + 1] - xy[k - 1]) * s / steps)));
+            }
+        }
+        return line;
+    }
+
+    @Test
+    void popularTraceIsFollowedBesideAStraighterFaintTrack() {
+        // Coming down, a popular trail bending, and a single straight track beside it to the same point: from the
+        // junction, the track is in the glow of the trail over its first pixels, as hot as it
+        List<Point> incoming = chain(100, 0, 100, 200);
+        List<Point> trail = chain(100, 200, 160, 225, 250, 350);
+        List<Point> track = chain(100, 200, 250, 350);
+        List<Point> after = chain(250, 350, 250, 511);
+        int[][] intensity = new int[SIZE][SIZE];
+        for (List<Point> line : List.of(incoming, trail, after)) {
+            for (Point p : line) {
+                intensity[p.y][p.x] = 230;
+            }
+        }
+        for (int k = 0; k < track.size(); k++) {
+            Point p = track.get(k);
+            intensity[p.y][p.x] = Math.max(intensity[p.y][p.x], k < 25 ? 230 : 30);
+        }
+        List<List<Point>> lines = TraceExtractor.joinContinuations(
+                new ArrayList<>(List.of(incoming, track, trail, after)), 50, intensity);
+        assertEquals(1, lines.size(), "lines " + lines);
+        for (Point p : lines.get(0)) {
+            assertTrue(intensity[p.y][p.x] == 230, "the trace follows the faint track at " + p);
         }
     }
 }

@@ -424,6 +424,50 @@ class SlideActionTest {
         }
     }
 
+    /** Paints a trail along a polyline of tile pixels (x, y pairs), with a halo of 4 pixels to each side. */
+    private static void paint(float[] density, int... xy) {
+        for (int y = 0; y < 512; y++) {
+            for (int x = 0; x < 512; x++) {
+                double d = Double.MAX_VALUE;
+                for (int k = 2; k < xy.length; k += 2) {
+                    double dx = xy[k] - xy[k - 2];
+                    double dy = xy[k + 1] - xy[k - 1];
+                    double t = Math.max(0, Math.min(1, ((x - xy[k - 2]) * dx + (y - xy[k - 1]) * dy) / (dx * dx + dy * dy)));
+                    d = Math.min(d, Math.hypot(x - xy[k - 2] - t * dx, y - xy[k - 1] - t * dy));
+                }
+                double heat = d < 0.5 ? 200 : d < 1.5 ? 170 : d < 2.5 ? 120 : d < 3.5 ? 80 : d < 4.5 ? 50 : 0;
+                density[y * 512 + x] = Math.max(density[y * 512 + x], (float) (heat / 255.0));
+            }
+        }
+    }
+
+    @Test
+    void sectionAcrossATightSwitchbackGoesRoundTheHairpin() {
+        // A trail going east, round a hairpin at x = 316, and back west 9 pixels (21 m) further south: the halos
+        // of the two legs leave no dark ground between them
+        float[] density = new float[512 * 512];
+        paint(density, 40, 256, 308, 256, 314, 258, 316, 260, 314, 263, 308, 265, 40, 265);
+        byte[] coverage = new byte[512 * 512];
+        java.util.Arrays.fill(coverage, (byte) 1);
+        SlideRaster raster = new SlideRaster(512, 512, 0, 0, Z, density, coverage, new byte[512 * 512],
+                new float[512 * 512]);
+        // A section drawn straight across the hairpin, 16 pixels (37 m) before its end
+        double[] start = {300, 256};
+        double[] end = {300, 265};
+        SlideAlgorithm.Options options = new SlideAlgorithm.Options();
+        options.scale = 2.3;
+        List<double[]> path = SlideAlgorithm.trace(raster, start, end, start, end, 40, options);
+        double east = 0;
+        for (double[] p : path) {
+            east = Math.max(east, p[0]);
+        }
+        assertTrue(east > 312, "the section cuts the hairpin at x = " + east);
+        // The original takes it for a jump to another trace
+        options.original = true;
+        assertThrows(SlideAlgorithm.NoSignalException.class,
+                () -> SlideAlgorithm.trace(raster, start, end, start, end, 40, options));
+    }
+
     /** Only the parts of the band along the line that were not downloaded yet are requested. */
     @Test
     void downloadAlongRequestsOnlyWhatIsMissing() {

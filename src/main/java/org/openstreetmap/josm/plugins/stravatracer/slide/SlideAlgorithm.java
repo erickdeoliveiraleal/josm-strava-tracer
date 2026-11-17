@@ -140,7 +140,9 @@ public final class SlideAlgorithm {
         /**
          * True: as the original. False (the default): vertices are not snapped to faint traces that the contrast
          * normalisation brings up as high as the trail, a vertex at a hook of the drawing is searched all around,
-         * and a vertex held on the trail by a traced section is not left as drawn because of its other section.
+         * a vertex held on the trail by a traced section is not left as drawn because of its other section, and a
+         * section across a tight switchback (the line between its anchors leaves the trail without crossing dark
+         * ground) may go round the hairpin.
          */
         public boolean original;
         public Double alignMeters;
@@ -846,6 +848,8 @@ public final class SlideAlgorithm {
     }
 
     static final double JUMP_BULGE = 0.25;
+    // The straight line between two anchors whose heat drops below this share of theirs leaves the trail.
+    static final double CHORD_VALLEY_SHARE = 0.6;
     static final double VALLEY_DIP = 0.8;
 
     static boolean crossesValley(SlideRaster raster, List<double[]> points) {
@@ -1029,15 +1033,24 @@ public final class SlideAlgorithm {
         double chord = Math.hypot(end[0] - start[0], end[1] - start[1]);
         int darkRun = 0;
         boolean cutsCorner = false;
+        double dip = Double.POSITIVE_INFINITY;
         for (int s = 0; s <= chord; s++) {
             double[] p = {
                 start[0] + ((end[0] - start[0]) * s) / Math.max(1, chord),
                 start[1] + ((end[1] - start[1]) * s) / Math.max(1, chord),
             };
-            darkRun = sampleDensity(raster, p) < 0.12 ? darkRun + 1 : 0;
+            double density = sampleDensity(raster, p);
+            dip = Math.min(dip, density);
+            darkRun = density < 0.12 ? darkRun + 1 : 0;
             if (darkRun * options.scale >= CORNER_GAP_METERS) {
                 cutsCorner = true;
             }
+        }
+        // Across a tight switchback, the halos of the two legs leave no dark ground between them: the line
+        // still leaves the trail where its heat drops well below the heat at the anchors
+        if (!options.original
+                && dip < CHORD_VALLEY_SHARE * Math.min(sampleDensity(raster, start), sampleDensity(raster, end))) {
+            cutsCorner = true;
         }
         if (!cutsCorner && stray > offset + bulge) {
             throw new NoSignalException("The heatmap trail here jumps to another trace.");

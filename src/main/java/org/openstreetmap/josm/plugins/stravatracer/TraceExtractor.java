@@ -593,6 +593,64 @@ public final class TraceExtractor {
     private static final double DOMINANCE_RATIO = 0.5;
     /** Number of pixels of a branch, from the junction, over which its heat is measured. */
     private static final int HEAT_PIXELS = 20;
+    /** Two branches between the same junctions, never farther apart than this (pixels), are the same way. */
+    private static final double PARALLEL_DISTANCE = 25;
+
+    /**
+     * Removes the fainter of two branches linking the same two junctions side by side (a single GPS track
+     * beside a popular trail): from a junction, both look as hot over their first pixels, and the straighter
+     * faint one would be followed.
+     */
+    static List<List<Point>> removeFaintParallels(List<List<Point>> lines, int[][] intensity) {
+        List<List<Point>> result = new ArrayList<>(lines);
+        for (boolean removed = true; removed;) {
+            removed = false;
+            search:
+            for (int a = 0; a < result.size(); a++) {
+                for (int b = a + 1; b < result.size(); b++) {
+                    List<Point> la = result.get(a);
+                    List<Point> lb = result.get(b);
+                    Set<Point> endsA = Set.of(la.get(0), la.get(la.size() - 1));
+                    if (la.get(0).equals(la.get(la.size() - 1))
+                            || !endsA.equals(Set.of(lb.get(0), lb.get(lb.size() - 1)))) {
+                        continue;
+                    }
+                    double ha = meanHeat(la, intensity);
+                    double hb = meanHeat(lb, intensity);
+                    List<Point> faint = ha < hb ? la : lb;
+                    List<Point> hot = ha < hb ? lb : la;
+                    if (Math.min(ha, hb) > DOMINANCE_RATIO * Math.max(ha, hb) || farthest(faint, hot) > PARALLEL_DISTANCE) {
+                        continue;
+                    }
+                    result.remove(faint);
+                    removed = true;
+                    break search;
+                }
+            }
+        }
+        return result;
+    }
+
+    private static double meanHeat(List<Point> line, int[][] intensity) {
+        double sum = 0;
+        for (Point p : line) {
+            sum += intensity[p.y][p.x];
+        }
+        return sum / line.size();
+    }
+
+    /** Largest distance from a point of a line to the nearest point of another one. */
+    private static double farthest(List<Point> line, List<Point> other) {
+        double result = 0;
+        for (Point p : line) {
+            double nearest = Double.MAX_VALUE;
+            for (Point q : other) {
+                nearest = Math.min(nearest, p.distance(q));
+            }
+            result = Math.max(result, nearest);
+        }
+        return result;
+    }
 
     /**
      * At each junction, joins the pairs of branches that continue each other, so that a trace crossed
@@ -604,7 +662,7 @@ public final class TraceExtractor {
      */
     static List<List<Point>> joinContinuations(List<List<Point>> input, double maxTurnAngle, int[][] intensity) {
         List<List<Point>> lines = new ArrayList<>();
-        for (List<Point> line : input) {
+        for (List<Point> line : intensity != null ? removeFaintParallels(input, intensity) : input) {
             lines.add(new ArrayList<>(line));
         }
         double minCos = -Math.cos(Math.toRadians(maxTurnAngle));
@@ -624,6 +682,12 @@ public final class TraceExtractor {
             int[] bestA = null;
             int[] bestB = null;
             for (List<int[]> inc : incidences.values()) {
+                if (inc.size() == 2 && inc.get(0)[0] != inc.get(1)[0]) {
+                    // Two lines left meeting end to end (a faint parallel branch was removed): one line
+                    bestA = inc.get(0);
+                    bestB = inc.get(1);
+                    break;
+                }
                 if (inc.size() < 3) {
                     continue;
                 }
