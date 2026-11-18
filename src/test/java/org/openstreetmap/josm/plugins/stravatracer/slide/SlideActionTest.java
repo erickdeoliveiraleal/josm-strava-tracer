@@ -110,6 +110,9 @@ class SlideActionTest {
         for (int i = 1; i < xs.size(); i++) {
             assertTrue(xs.get(i) > xs.get(i - 1), "the line goes back: " + xs);
         }
+        // Back and forth over 80 m of the same trail, longer than a small loop
+        List<SlideAlgorithm.Record> longFold = metres(0, 0, 100, 0, 100, 2, 20, 4, 25, 1, 150, 0);
+        assertEquals(3, SlideFolds.remove(longFold, Set.of()).size());
         // A spike with a short leg
         assertEquals(3, SlideFolds.remove(metres(0, 0, 30, 0, 27, 0.2, 60, 0), Set.of()).size());
         // A hairpin with legs 15 m apart, and a loop of 120 m, are kept

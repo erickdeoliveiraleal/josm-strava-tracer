@@ -17,8 +17,14 @@ final class SlideFolds {
 
     /** A line coming back this close to where it already went has made a loop. */
     static final double CLOSE_METERS = 2.5;
-    /** Longest loop removed: a longer one is a loop of the trail itself. */
+    /** Longest loop always removed: a longer one may be a loop of the trail itself. */
     static final double MAX_LOOP_METERS = 50;
+    /**
+     * Longest loop removed when it only goes back and forth along the rest of the line (all its points within
+     * {@link #FOLD_METERS} of it): the line ran several times along the same stretch of trail.
+     */
+    static final double MAX_FOLD_METERS = 500;
+    static final double FOLD_METERS = 8;
     /** A vertex turning back more than this, with a short leg, is a spike. */
     static final double SPIKE_DEGREES = 150;
     static final double SPIKE_LEG_METERS = 5;
@@ -83,16 +89,44 @@ final class SlideFolds {
                         : Math.max(0, Math.min(1, ((q[0] - a[0]) * dx + (q[1] - a[1]) * dy) / length2));
                 double d = Math.hypot(q[0] - a[0] - t * dx, q[1] - a[1] - t * dy);
                 double loop = along + Math.sqrt(length2) * (1 - t);
-                if (loop > MAX_LOOP_METERS) {
+                if (loop > MAX_FOLD_METERS) {
                     break;
                 }
-                if (d < CLOSE_METERS && loop > 3 * d + 2 * CLOSE_METERS && removable(line, k + 1, j - 1, keep)) {
+                if (d < CLOSE_METERS && loop > 3 * d + 2 * CLOSE_METERS && removable(line, k + 1, j - 1, keep)
+                        && (loop <= MAX_LOOP_METERS || alongTheRest(line, k, j, cos))) {
                     line.subList(k + 1, j).clear();
                     return true;
                 }
             }
         }
         return false;
+    }
+
+    /** Whether all the points between k and j are near the line without them: the loop is a fold. */
+    private static boolean alongTheRest(List<Record> line, int k, int j, double cos) {
+        for (int i = k + 1; i < j; i++) {
+            double[] q = xy(line.get(i), cos);
+            boolean near = false;
+            for (int m = 0; m < line.size() - 1 && !near; m++) {
+                int next = m == k ? j : m + 1;
+                if (m > k && m < j) {
+                    continue;
+                }
+                near = distance(q, xy(line.get(m), cos), xy(line.get(next), cos)) < FOLD_METERS;
+            }
+            if (!near) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static double distance(double[] q, double[] a, double[] b) {
+        double dx = b[0] - a[0];
+        double dy = b[1] - a[1];
+        double length2 = dx * dx + dy * dy;
+        double t = length2 == 0 ? 0 : Math.max(0, Math.min(1, ((q[0] - a[0]) * dx + (q[1] - a[1]) * dy) / length2));
+        return Math.hypot(q[0] - a[0] - t * dx, q[1] - a[1] - t * dy);
     }
 
     /** Removes the first spike: a vertex where the line turns back, with a short leg. */
