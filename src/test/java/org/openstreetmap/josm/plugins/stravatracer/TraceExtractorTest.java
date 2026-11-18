@@ -287,4 +287,36 @@ class TraceExtractorTest {
         assertEquals(1, lines.size(), "lines " + lines);
         assertTrue(lines.get(0).contains(new Point(150, 400)), "the trace jumps across the bend");
     }
+
+    @Test
+    void popularTrailIsFollowedRoundAHairpinBesideAStraightFaintBranch() {
+        // A popular trail turning back sharply at a junction, and a faint branch going straight on, as hot as the
+        // trail over its first pixels
+        List<Point> incoming = chain(0, 200, 200, 200);
+        List<Point> trail = chain(200, 200, 150, 300, 150, 500);
+        List<Point> branch = chain(200, 200, 450, 200);
+        int[][] intensity = new int[SIZE][SIZE];
+        for (int k = 0; k < branch.size(); k++) {
+            intensity[branch.get(k).y][branch.get(k).x] = k < 15 ? 120 : 50;
+        }
+        for (List<Point> line : List.of(incoming, trail)) {
+            for (Point p : line) {
+                intensity[p.y][p.x] = 120;
+            }
+        }
+        List<List<Point>> lines = TraceExtractor.joinContinuations(
+                new ArrayList<>(List.of(incoming, branch, trail)), 50, intensity);
+        assertEquals(2, lines.size(), "lines " + lines);
+        for (List<Point> line : lines) {
+            assertTrue(line.contains(new Point(0, 200)) == line.contains(new Point(150, 500)),
+                    "the trace goes on along the faint branch");
+        }
+        // Without heat, the straight branch
+        List<List<Point>> byAngle = TraceExtractor.joinContinuations(
+                new ArrayList<>(List.of(incoming, branch, trail)), 50, null);
+        assertEquals(2, byAngle.size());
+        for (List<Point> line : byAngle) {
+            assertTrue(line.contains(new Point(0, 200)) == line.contains(new Point(450, 200)));
+        }
+    }
 }

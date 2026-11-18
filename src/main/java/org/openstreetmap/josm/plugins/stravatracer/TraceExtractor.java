@@ -593,6 +593,19 @@ public final class TraceExtractor {
     private static final double DOMINANCE_RATIO = 0.5;
     /** Number of pixels of a branch, from the junction, over which its heat is measured. */
     private static final int HEAT_PIXELS = 20;
+    /**
+     * Stretch of a branch (pixels from the junction) whose heat tells which branches continue each other:
+     * past the glow of the junction, before the branch meets other traces.
+     */
+    private static final int STRETCH_FROM = 10;
+    private static final int STRETCH_TO = 80;
+    /** Pairs of branches this much less alike in heat than the most alike pair are not joined. */
+    private static final double ALIKE_MARGIN = 0.15;
+    /**
+     * Cosine (between the directions from the junction) of the sharpest turn of a popular trail followed beyond
+     * the maximum turn angle, when a straighter branch is much fainter: 150 degrees.
+     */
+    private static final double SHARP_COS = Math.cos(Math.toRadians(30));
     /** Two branches between the same junctions, never farther apart than this (pixels), are the same way. */
     private static final double PARALLEL_DISTANCE = 25;
     /**
@@ -722,21 +735,51 @@ public final class TraceExtractor {
                     bestB = dominant[1];
                     break;
                 }
+                // The branches alike in heat continue each other (a faint track does not continue a popular
+                // trail), and among them the straightest pair
+                double[] stretch = new double[inc.size()];
+                for (int k = 0; k < inc.size(); k++) {
+                    stretch[k] = intensity == null ? 1
+                            : stretchHeat(lines.get(inc.get(k)[0]), inc.get(k)[1] == 0, intensity);
+                }
+                double mostAlike = 0;
+                boolean anyInAngle = false;
                 for (int a = 0; a < inc.size(); a++) {
                     for (int b = a + 1; b < inc.size(); b++) {
-                        if (inc.get(a)[0] == inc.get(b)[0]) {
-                            continue;
-                        }
-                        double[] da = direction(lines.get(inc.get(a)[0]), inc.get(a)[1] == 0);
-                        double[] db = direction(lines.get(inc.get(b)[0]), inc.get(b)[1] == 0);
-                        // Opposite directions from the junction: the branches continue each other
-                        double cos = da[0] * db[0] + da[1] * db[1];
-                        if (cos < bestCos) {
-                            bestCos = cos;
-                            bestA = inc.get(a);
-                            bestB = inc.get(b);
+                        double cos = cosine(lines, inc.get(a), inc.get(b));
+                        if (inc.get(a)[0] != inc.get(b)[0] && cos < SHARP_COS) {
+                            mostAlike = Math.max(mostAlike, alike(stretch[a], stretch[b]));
+                            anyInAngle |= cos < minCos;
                         }
                     }
+                }
+                double alikeCos = SHARP_COS;
+                int[] alikeA = null;
+                int[] alikeB = null;
+                for (int a = 0; a < inc.size(); a++) {
+                    for (int b = a + 1; b < inc.size(); b++) {
+                        if (inc.get(a)[0] == inc.get(b)[0]
+                                || alike(stretch[a], stretch[b]) < mostAlike - ALIKE_MARGIN) {
+                            continue;
+                        }
+                        // Opposite directions from the junction: the branches continue each other
+                        double cos = cosine(lines, inc.get(a), inc.get(b));
+                        if (cos < alikeCos) {
+                            alikeCos = cos;
+                            alikeA = inc.get(a);
+                            alikeB = inc.get(b);
+                        }
+                    }
+                }
+                if (alikeA != null && alikeCos < bestCos) {
+                    bestCos = alikeCos;
+                    bestA = alikeA;
+                    bestB = alikeB;
+                } else if (alikeA != null && alikeCos >= minCos && anyInAngle) {
+                    // A popular trail turning sharply (a hairpin), beside a straighter but fainter branch
+                    bestA = alikeA;
+                    bestB = alikeB;
+                    break;
                 }
             }
             if (bestA != null) {
@@ -778,6 +821,29 @@ public final class TraceExtractor {
             return null;
         }
         return new int[][] {a, b};
+    }
+
+    private static double cosine(List<List<Point>> lines, int[] a, int[] b) {
+        double[] da = direction(lines.get(a[0]), a[1] == 0);
+        double[] db = direction(lines.get(b[0]), b[1] == 0);
+        return da[0] * db[0] + da[1] * db[1];
+    }
+
+    /** 1 for two branches as hot, down to 0. */
+    private static double alike(double a, double b) {
+        return Math.max(a, b) == 0 ? 1 : Math.min(a, b) / Math.max(a, b);
+    }
+
+    /** Mean intensity of a line from {@link #STRETCH_FROM} to {@link #STRETCH_TO} pixels from one of its ends. */
+    private static double stretchHeat(List<Point> line, boolean fromStart, int[][] intensity) {
+        int from = line.size() > STRETCH_FROM ? STRETCH_FROM : 0;
+        int to = Math.min(STRETCH_TO, line.size());
+        double sum = 0;
+        for (int i = from; i < to; i++) {
+            Point p = line.get(fromStart ? i : line.size() - 1 - i);
+            sum += intensity[p.y][p.x];
+        }
+        return sum / (to - from);
     }
 
     /** Mean intensity of the first pixels of a line, from one of its ends. */
