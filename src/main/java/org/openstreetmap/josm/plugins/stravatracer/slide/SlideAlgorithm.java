@@ -1027,8 +1027,13 @@ public final class SlideAlgorithm {
         for (double[] p : points) {
             stray = Math.max(stray, sideways(p, originalStart, sdx, sdy, segmentLength));
         }
-        double bulge = Math.max(JUMP_METERS / options.scale,
-                crossesValley(raster, points) ? 0 : JUMP_BULGE * segmentLength);
+        boolean valley = crossesValley(raster, points);
+        double bulge = Math.max(JUMP_METERS / options.scale, valley ? 0 : JUMP_BULGE * segmentLength);
+        // A vertex drawn beside a wide trail snaps only to the edge of its band (it moves at most ALIGN_METERS):
+        // without a valley on the way, the path to the ridge and back stays on the same trail
+        if (!options.original && !valley) {
+            bulge += JUMP_METERS / options.scale;
+        }
         // Unless the straight line between the anchors crosses dark ground: the drawing cut a corner.
         double chord = Math.hypot(end[0] - start[0], end[1] - start[1]);
         int darkRun = 0;

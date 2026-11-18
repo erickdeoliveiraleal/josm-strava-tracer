@@ -477,6 +477,47 @@ class SlideActionTest {
                 () -> SlideAlgorithm.trace(raster, start, end, start, end, 40, options));
     }
 
+    @Test
+    void sectionToTheRidgeOfAWideTrailIsNotAJump() {
+        // A wide trail (a road) bending south: its ridge runs 7 pixels (17 m) south of a short drawn section,
+        // whose vertices snapped only to the northern edge of the band (vertex 2603842282 of way 1055349067)
+        int[] ridge = {60, 258, 100, 258, 105, 259, 110, 258, 150, 258};
+        float[] density = new float[512 * 512];
+        for (int y = 0; y < 512; y++) {
+            for (int x = 0; x < 512; x++) {
+                double d = Double.MAX_VALUE;
+                for (int k = 2; k < ridge.length; k += 2) {
+                    double dx = ridge[k] - ridge[k - 2];
+                    double dy = ridge[k + 1] - ridge[k - 1];
+                    double t = Math.max(0, Math.min(1, ((x - ridge[k - 2]) * dx + (y - ridge[k - 1]) * dy)
+                            / (dx * dx + dy * dy)));
+                    d = Math.min(d, Math.hypot(x - ridge[k - 2] - t * dx, y - ridge[k - 1] - t * dy));
+                }
+                density[y * 512 + x] = (float) Math.exp(-(d / 6) * (d / 6));
+            }
+        }
+        byte[] coverage = new byte[512 * 512];
+        java.util.Arrays.fill(coverage, (byte) 1);
+        SlideRaster raster = new SlideRaster(512, 512, 0, 0, Z, density, coverage, new byte[512 * 512],
+                new float[512 * 512]);
+        double[] a = {100, 252};
+        double[] b = {110, 252};
+        double[] start = {100, 254.5};
+        double[] end = {110, 254.5};
+        SlideAlgorithm.Options options = new SlideAlgorithm.Options();
+        options.scale = 2.37;
+        List<double[]> path = SlideAlgorithm.trace(raster, start, end, a, b, 10, options);
+        double south = 0;
+        for (double[] p : path) {
+            south = Math.max(south, p[1]);
+        }
+        assertTrue(south >= 258, "the section does not follow the ridge: y = " + south);
+        // The original takes it for a jump to another trace
+        options.original = true;
+        assertThrows(SlideAlgorithm.NoSignalException.class,
+                () -> SlideAlgorithm.trace(raster, start, end, a, b, 10, options));
+    }
+
     /** Only the parts of the band along the line that were not downloaded yet are requested. */
     @Test
     void downloadAlongRequestsOnlyWhatIsMissing() {
