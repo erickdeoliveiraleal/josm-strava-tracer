@@ -610,9 +610,13 @@ public final class TraceExtractor {
                 for (int b = a + 1; b < result.size(); b++) {
                     List<Point> la = result.get(a);
                     List<Point> lb = result.get(b);
-                    Set<Point> endsA = Set.of(la.get(0), la.get(la.size() - 1));
-                    if (la.get(0).equals(la.get(la.size() - 1))
-                            || !endsA.equals(Set.of(lb.get(0), lb.get(lb.size() - 1)))) {
+                    Point a0 = la.get(0);
+                    Point a1 = la.get(la.size() - 1);
+                    Point b0 = lb.get(0);
+                    Point b1 = lb.get(lb.size() - 1);
+                    // Loops are left alone
+                    if (a0.equals(a1) || b0.equals(b1)
+                            || !(a0.equals(b0) && a1.equals(b1) || a0.equals(b1) && a1.equals(b0))) {
                         continue;
                     }
                     double ha = meanHeat(la, intensity);

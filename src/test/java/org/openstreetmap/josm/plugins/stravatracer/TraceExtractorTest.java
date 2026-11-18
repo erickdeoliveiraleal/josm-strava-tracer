@@ -249,4 +249,19 @@ class TraceExtractorTest {
             assertTrue(intensity[p.y][p.x] == 230, "the trace follows the faint track at " + p);
         }
     }
+
+    @Test
+    void loopsAreLeftAloneWhenLookingForParallelBranches() {
+        // A loop (both ends on the junction), and a line from the junction
+        List<Point> loop = chain(100, 100, 150, 100, 150, 150, 100, 100);
+        List<Point> line = chain(100, 100, 100, 300);
+        int[][] intensity = new int[SIZE][SIZE];
+        for (List<Point> l : List.of(loop, line)) {
+            for (Point p : l) {
+                intensity[p.y][p.x] = 200;
+            }
+        }
+        assertEquals(2, TraceExtractor.removeFaintParallels(List.of(loop, line), intensity).size());
+        assertEquals(2, TraceExtractor.removeFaintParallels(List.of(loop, loop), intensity).size());
+    }
 }
