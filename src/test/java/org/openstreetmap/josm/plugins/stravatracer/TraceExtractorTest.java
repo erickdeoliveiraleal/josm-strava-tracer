@@ -264,4 +264,27 @@ class TraceExtractorTest {
         assertEquals(2, TraceExtractor.removeFaintParallels(List.of(loop, line), intensity).size());
         assertEquals(2, TraceExtractor.removeFaintParallels(List.of(loop, loop), intensity).size());
     }
+
+    @Test
+    void straightGpsJumpAcrossABendIsNotFollowed() {
+        // A trail winding far down between two junctions, and a fainter straight track between them (a GPS jump),
+        // straighter from the incoming trail and as hot as it over its first pixels
+        List<Point> incoming = chain(0, 200, 100, 200);
+        List<Point> trail = chain(100, 200, 150, 400, 260, 250);
+        List<Point> jump = chain(100, 200, 260, 250);
+        List<Point> after = chain(260, 250, 300, 500);
+        int[][] intensity = new int[SIZE][SIZE];
+        for (int k = 0; k < jump.size(); k++) {
+            intensity[jump.get(k).y][jump.get(k).x] = k < 25 || k > jump.size() - 25 ? 120 : 70;
+        }
+        for (List<Point> line : List.of(incoming, trail, after)) {
+            for (Point p : line) {
+                intensity[p.y][p.x] = 120;
+            }
+        }
+        List<List<Point>> lines = TraceExtractor.joinContinuations(
+                new ArrayList<>(List.of(incoming, jump, trail, after)), 50, intensity);
+        assertEquals(1, lines.size(), "lines " + lines);
+        assertTrue(lines.get(0).contains(new Point(150, 400)), "the trace jumps across the bend");
+    }
 }

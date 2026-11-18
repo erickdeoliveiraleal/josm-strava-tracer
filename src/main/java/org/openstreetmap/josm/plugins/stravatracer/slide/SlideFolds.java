@@ -21,10 +21,14 @@ final class SlideFolds {
     static final double MAX_LOOP_METERS = 50;
     /**
      * Longest loop removed when it only goes back and forth along the rest of the line (all its points within
-     * {@link #FOLD_METERS} of it): the line ran several times along the same stretch of trail.
+     * {@link #FOLD_METERS} of it), or when the line goes on after it the way it went before it: either way the
+     * line ran several times along the same stretch of trail. A loop of the trail that the line comes back from
+     * the other way (out along a trail, round the loop, back along the same trail) is kept.
      */
     static final double MAX_FOLD_METERS = 500;
     static final double FOLD_METERS = 8;
+    /** Cosine of the largest angle between the line before a loop and after it for the same way. */
+    static final double SAME_WAY = 0.7;
     /** A vertex turning back more than this, with a short leg, is a spike. */
     static final double SPIKE_DEGREES = 150;
     static final double SPIKE_LEG_METERS = 5;
@@ -93,13 +97,28 @@ final class SlideFolds {
                     break;
                 }
                 if (d < CLOSE_METERS && loop > 3 * d + 2 * CLOSE_METERS && removable(line, k + 1, j - 1, keep)
-                        && (loop <= MAX_LOOP_METERS || alongTheRest(line, k, j, cos))) {
+                        && (loop <= MAX_LOOP_METERS || alongTheRest(line, k, j, cos) || goesOn(line, k, j, cos))) {
                     line.subList(k + 1, j).clear();
                     return true;
                 }
             }
         }
         return false;
+    }
+
+    /** Whether the line goes on after j the way it went from k: it passes the same stretch again. */
+    private static boolean goesOn(List<Record> line, int k, int j, double cos) {
+        if (j + 1 >= line.size()) {
+            return false;
+        }
+        double[] a = xy(line.get(k), cos);
+        double[] b = xy(line.get(k + 1), cos);
+        double[] c = xy(line.get(j), cos);
+        double[] d = xy(line.get(j + 1), cos);
+        double[] u = {b[0] - a[0], b[1] - a[1]};
+        double[] v = {d[0] - c[0], d[1] - c[1]};
+        double lengths = Math.hypot(u[0], u[1]) * Math.hypot(v[0], v[1]);
+        return lengths > 0 && (u[0] * v[0] + u[1] * v[1]) / lengths > SAME_WAY;
     }
 
     /** Whether all the points between k and j are near the line without them: the loop is a fold. */

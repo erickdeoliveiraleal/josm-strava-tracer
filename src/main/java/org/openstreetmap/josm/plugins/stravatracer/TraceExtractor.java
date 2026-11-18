@@ -595,11 +595,18 @@ public final class TraceExtractor {
     private static final int HEAT_PIXELS = 20;
     /** Two branches between the same junctions, never farther apart than this (pixels), are the same way. */
     private static final double PARALLEL_DISTANCE = 25;
+    /**
+     * A branch never farther than this (pixels), or than {@link #STRAIGHT_SHARE} of its length, from the straight
+     * line between its ends is straight (the skeleton bends a little into the junctions).
+     */
+    private static final double STRAIGHT_DISTANCE = 3;
+    private static final double STRAIGHT_SHARE = 0.05;
 
     /**
      * Removes the fainter of two branches linking the same two junctions side by side (a single GPS track
      * beside a popular trail): from a junction, both look as hot over their first pixels, and the straighter
-     * faint one would be followed.
+     * faint one would be followed. Also removes a fainter straight branch between two junctions linked by a
+     * winding one, however far apart: a GPS jump across the bend of the trail.
      */
     static List<List<Point>> removeFaintParallels(List<List<Point>> lines, int[][] intensity) {
         List<List<Point>> result = new ArrayList<>(lines);
@@ -623,7 +630,9 @@ public final class TraceExtractor {
                     double hb = meanHeat(lb, intensity);
                     List<Point> faint = ha < hb ? la : lb;
                     List<Point> hot = ha < hb ? lb : la;
-                    if (Math.min(ha, hb) > DOMINANCE_RATIO * Math.max(ha, hb) || farthest(faint, hot) > PARALLEL_DISTANCE) {
+                    boolean jump = ha != hb && straight(faint) && !straight(hot);
+                    if (!jump && (Math.min(ha, hb) > DOMINANCE_RATIO * Math.max(ha, hb)
+                            || farthest(faint, hot) > PARALLEL_DISTANCE)) {
                         continue;
                     }
                     result.remove(faint);
@@ -633,6 +642,18 @@ public final class TraceExtractor {
             }
         }
         return result;
+    }
+
+    private static boolean straight(List<Point> line) {
+        Point a = line.get(0);
+        Point b = line.get(line.size() - 1);
+        double tolerance = Math.max(STRAIGHT_DISTANCE, STRAIGHT_SHARE * a.distance(b));
+        for (Point p : line) {
+            if (distanceToSegment(p, a, b) > tolerance) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private static double meanHeat(List<Point> line, int[][] intensity) {

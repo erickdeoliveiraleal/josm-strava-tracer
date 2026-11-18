@@ -113,6 +113,12 @@ class SlideActionTest {
         // Back and forth over 80 m of the same trail, longer than a small loop
         List<SlideAlgorithm.Record> longFold = metres(0, 0, 100, 0, 100, 2, 20, 4, 25, 1, 150, 0);
         assertEquals(3, SlideFolds.remove(longFold, Set.of()).size());
+        // A 60 m loop down, back onto the line, which goes on the way it went: it passes there twice
+        List<SlideAlgorithm.Record> knot = metres(0, 0, 40, 0, 50, 0, 55, -10, 50, -20, 40, -20, 35, -10, 41, 0.5, 80, 0);
+        assertEquals(4, SlideFolds.remove(knot, Set.of()).size());
+        // Out along a trail, round its loop and back along the same trail: kept
+        List<SlideAlgorithm.Record> lollipop = metres(0, 0, 60, 0, 90, -15, 90, 15, 61, 0.5, 0, 1);
+        assertEquals(lollipop.size(), SlideFolds.remove(lollipop, Set.of()).size());
         // A spike with a short leg
         assertEquals(3, SlideFolds.remove(metres(0, 0, 30, 0, 27, 0.2, 60, 0), Set.of()).size());
         // A hairpin with legs 15 m apart, and a loop of 120 m, are kept
