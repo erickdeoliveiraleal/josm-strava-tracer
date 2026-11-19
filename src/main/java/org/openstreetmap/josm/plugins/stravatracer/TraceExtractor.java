@@ -742,12 +742,23 @@ public final class TraceExtractor {
                     stretch[k] = intensity == null ? 1
                             : stretchHeat(lines.get(inc.get(k)[0]), inc.get(k)[1] == 0, intensity);
                 }
+                // ...one of them (nearly) the hottest: a junction never ends the most popular trail (where a trail
+                // splits into faint strands, the strands are alike in heat); two strands meeting again are no pair
+                double hottest = 0;
+                for (double h : stretch) {
+                    hottest = Math.max(hottest, h);
+                }
+                boolean[] hot = new boolean[inc.size()];
+                for (int k = 0; k < inc.size(); k++) {
+                    hot[k] = stretch[k] >= (1 - ALIKE_MARGIN) * hottest;
+                }
                 double mostAlike = 0;
                 boolean anyInAngle = false;
                 for (int a = 0; a < inc.size(); a++) {
                     for (int b = a + 1; b < inc.size(); b++) {
                         double cos = cosine(lines, inc.get(a), inc.get(b));
-                        if (inc.get(a)[0] != inc.get(b)[0] && cos < SHARP_COS) {
+                        if (inc.get(a)[0] != inc.get(b)[0] && cos < SHARP_COS && (hot[a] || hot[b])
+                                && !loop(lines, inc.get(a), inc.get(b))) {
                             mostAlike = Math.max(mostAlike, alike(stretch[a], stretch[b]));
                             anyInAngle |= cos < minCos;
                         }
@@ -758,7 +769,8 @@ public final class TraceExtractor {
                 int[] alikeB = null;
                 for (int a = 0; a < inc.size(); a++) {
                     for (int b = a + 1; b < inc.size(); b++) {
-                        if (inc.get(a)[0] == inc.get(b)[0]
+                        if (inc.get(a)[0] == inc.get(b)[0] || !(hot[a] || hot[b])
+                                || loop(lines, inc.get(a), inc.get(b))
                                 || alike(stretch[a], stretch[b]) < mostAlike - ALIKE_MARGIN) {
                             continue;
                         }
@@ -827,6 +839,18 @@ public final class TraceExtractor {
         double[] da = direction(lines.get(a[0]), a[1] == 0);
         double[] db = direction(lines.get(b[0]), b[1] == 0);
         return da[0] * db[0] + da[1] * db[1];
+    }
+
+    /**
+     * Whether two branches of a junction meet again soon (their other ends are within
+     * {@link #PARALLEL_DISTANCE}): two strands of a trail, not a trail and its continuation.
+     */
+    private static boolean loop(List<List<Point>> lines, int[] a, int[] b) {
+        List<Point> la = lines.get(a[0]);
+        List<Point> lb = lines.get(b[0]);
+        Point ea = a[1] == 0 ? la.get(la.size() - 1) : la.get(0);
+        Point eb = b[1] == 0 ? lb.get(lb.size() - 1) : lb.get(0);
+        return ea.distance(eb) <= PARALLEL_DISTANCE;
     }
 
     /** 1 for two branches as hot, down to 0. */

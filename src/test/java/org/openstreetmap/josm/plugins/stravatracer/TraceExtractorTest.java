@@ -289,6 +289,33 @@ class TraceExtractorTest {
     }
 
     @Test
+    void trailIsFollowedThroughTheStrandsWhereItSplits() {
+        // A trail splitting into faint strands at a junction, which meet again on the trail further on: the two
+        // strands are alike in heat, but they do not continue each other (way 1582016038)
+        List<Point> incoming = chain(200, 0, 200, 200);
+        List<Point> strandA = chain(200, 200, 200, 212);
+        List<Point> strandB = chain(200, 200, 188, 215, 196, 230);
+        List<Point> link = chain(200, 212, 196, 230);
+        List<Point> strandC = chain(200, 212, 215, 260, 200, 300);
+        List<Point> trail = chain(196, 230, 200, 300);
+        List<Point> further = chain(200, 300, 200, 500);
+        int[][] intensity = new int[SIZE][SIZE];
+        int[] heats = {50, 15, 21, 70, 20, 50, 50};
+        List<List<Point>> all = List.of(incoming, strandA, strandB, link, strandC, trail, further);
+        for (int k = 0; k < all.size(); k++) {
+            for (Point p : all.get(k)) {
+                intensity[p.y][p.x] = heats[k];
+            }
+        }
+        List<List<Point>> lines = TraceExtractor.joinContinuations(new ArrayList<>(all), 50, intensity);
+        boolean through = false;
+        for (List<Point> line : lines) {
+            through |= line.contains(new Point(200, 0)) && line.contains(new Point(200, 500));
+        }
+        assertTrue(through, "the trace stops where the trail splits: " + lines.size() + " lines");
+    }
+
+    @Test
     void popularTrailIsFollowedRoundAHairpinBesideAStraightFaintBranch() {
         // A popular trail turning back sharply at a junction, and a faint branch going straight on, as hot as the
         // trail over its first pixels
