@@ -27,6 +27,8 @@ final class SlideFolds {
      */
     static final double MAX_FOLD_METERS = 500;
     static final double FOLD_METERS = 8;
+    /** Longest knot (the line crossing itself) removed whichever way the line leaves it, but back. */
+    static final double MAX_KNOT_METERS = 100;
     /** Cosine of the largest angle between the line before a loop and after it for the same way. */
     static final double SAME_WAY = 0.7;
     /** A vertex turning back more than this, with a short leg, is a spike. */
@@ -52,7 +54,7 @@ final class SlideFolds {
         List<Record> line = new ArrayList<>(records);
         if (line.size() > 3) {
             double cos = Math.cos(Math.toRadians(line.get(0).loc[1]));
-            while (cutLoop(line, keep, cos) || cutSpike(line, keep, cos)) {
+            while (cutLoop(line, keep, cos) || cutCrossing(line, keep, cos) || cutSpike(line, keep, cos)) {
                 // Again, until none is left
             }
         }
@@ -99,6 +101,51 @@ final class SlideFolds {
                 if (d < CLOSE_METERS && loop > 3 * d + 2 * CLOSE_METERS && removable(line, k + 1, j - 1, keep)
                         && (loop <= MAX_LOOP_METERS || alongTheRest(line, k, j, cos) || goesOn(line, k, j, cos))) {
                     line.subList(k + 1, j).clear();
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Cuts the first knot: a segment crosses one the line went along shortly before, its vertices too far from it
+     * for {@link #cutLoop}. The knot is replaced by the crossing point: up to {@link #MAX_LOOP_METERS} always, up to
+     * {@link #MAX_KNOT_METERS} unless the line leaves it back along the way it came (a loop of the trail at the end of
+     * a stem), and longer when the line leaves it the way it came in.
+     */
+    private static boolean cutCrossing(List<Record> line, Set<Integer> keep, double cos) {
+        for (int j = 3; j < line.size(); j++) {
+            double[] c = xy(line.get(j - 1), cos);
+            double[] d = xy(line.get(j), cos);
+            double along = 0;
+            for (int k = j - 3; k >= 0; k--) {
+                double[] a = xy(line.get(k), cos);
+                double[] b = xy(line.get(k + 1), cos);
+                along += Math.hypot(xy(line.get(k + 2), cos)[0] - b[0], xy(line.get(k + 2), cos)[1] - b[1]);
+                if (along > MAX_FOLD_METERS) {
+                    break;
+                }
+                double[] u = {b[0] - a[0], b[1] - a[1]};
+                double[] v = {d[0] - c[0], d[1] - c[1]};
+                double denominator = u[0] * v[1] - u[1] * v[0];
+                if (denominator == 0) {
+                    continue;
+                }
+                double t = ((c[0] - a[0]) * v[1] - (c[1] - a[1]) * v[0]) / denominator;
+                double s = ((c[0] - a[0]) * u[1] - (c[1] - a[1]) * u[0]) / denominator;
+                if (t <= 0 || t >= 1 || s <= 0 || s >= 1 || !removable(line, k + 1, j - 1, keep)) {
+                    continue;
+                }
+                double loop = Math.hypot(u[0], u[1]) * (1 - t) + along + Math.hypot(v[0], v[1]) * s;
+                double sameWay = (u[0] * v[0] + u[1] * v[1]) / (Math.hypot(u[0], u[1]) * Math.hypot(v[0], v[1]));
+                if (loop <= MAX_LOOP_METERS || (loop <= MAX_KNOT_METERS && sameWay > -SAME_WAY)
+                        || sameWay > SAME_WAY) {
+                    double[] p = line.get(k).loc;
+                    double[] q = line.get(k + 1).loc;
+                    line.subList(k + 1, j).clear();
+                    double[] crossing = {p[0] + t * (q[0] - p[0]), p[1] + t * (q[1] - p[1])};
+                    line.add(k + 1, new Record(crossing, null));
                     return true;
                 }
             }

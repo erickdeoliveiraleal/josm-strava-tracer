@@ -116,6 +116,12 @@ class SlideActionTest {
         // A 60 m loop down, back onto the line, which goes on the way it went: it passes there twice
         List<SlideAlgorithm.Record> knot = metres(0, 0, 40, 0, 50, 0, 55, -10, 50, -20, 40, -20, 35, -10, 41, 0.5, 80, 0);
         assertEquals(4, SlideFolds.remove(knot, Set.of()).size());
+        // A 55 m knot crossing the line, its vertices 4 m from it, which goes on across the way it went
+        // (node 14396340165): the knot is replaced by the crossing point
+        List<SlideAlgorithm.Record> crossed = metres(0, 0, 40, 0, 50, 0, 60, 8, 55, 18, 45, 18, 44, 4, 43, -4, 43, -40);
+        List<SlideAlgorithm.Record> uncrossed = SlideFolds.remove(crossed, Set.of());
+        assertEquals(5, uncrossed.size(), "the knot is kept");
+        assertEquals(43.5, uncrossed.get(2).loc[0] * 111_320, 0.1);
         // Out along a trail, round its loop and back along the same trail: kept
         List<SlideAlgorithm.Record> lollipop = metres(0, 0, 60, 0, 90, -15, 90, 15, 61, 0.5, 0, 1);
         assertEquals(lollipop.size(), SlideFolds.remove(lollipop, Set.of()).size());
