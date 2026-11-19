@@ -95,6 +95,37 @@ class TraceBuilderTest {
     }
 
     @Test
+    void freeEndIsConnectedWhereTheHeatGoesOn() {
+        // A trail coming down to (300, 300), turning east and going on down a road at x = 308; the nearest road,
+        // at x = 294, is across dark ground (node 14396393438)
+        int[][] intensity = new int[SIZE][SIZE];
+        for (int y = 100; y <= 700; y++) {
+            for (int x = 0; x < SIZE; x++) {
+                boolean trail = (y <= 300 && Math.abs(x - 300) <= 2) || (Math.abs(y - 300) <= 2 && x >= 298 && x <= 310)
+                        || (y >= 300 && Math.abs(x - 308) <= 2);
+                intensity[y][x] = trail ? 160 : 0;
+            }
+        }
+        HeatmapWindow w = new HeatmapWindow(15, 256, 12022L * 256, 17839L * 256, intensity);
+        DataSet ds = new DataSet();
+        Way near = new Way();
+        near.setNodes(List.of(node(ds, w, 294, 250), node(ds, w, 294, 700)));
+        near.put("highway", "residential");
+        ds.addPrimitive(near);
+        Node top = node(ds, w, 308, 300);
+        Way onHeat = new Way();
+        onHeat.setNodes(List.of(top, node(ds, w, 308, 700)));
+        onHeat.put("highway", "residential");
+        ds.addPrimitive(onHeat);
+
+        List<List<Point>> lines = List.of(List.of(new Point(300, 100), new Point(300, 300)));
+        List<Way> created = new ArrayList<>();
+        TraceBuilder.build(ds, ds.getWays(), lines, w, 40, Map.of("highway", "path"), created).executeCommand();
+        assertSame(top, created.get(0).lastNode(), "connected across dark ground");
+        assertEquals(2, near.getNodesCount());
+    }
+
+    @Test
     void endsFarFromAnyWayAreLeftFree() {
         HeatmapWindow w = window();
         DataSet ds = new DataSet();

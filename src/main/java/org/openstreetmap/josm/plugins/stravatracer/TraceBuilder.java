@@ -34,6 +34,9 @@ import org.openstreetmap.josm.data.osm.Way;
  */
 public final class TraceBuilder {
 
+    /** A connection whose heat drops below this share of the heat at the end of the trace crosses dark ground. */
+    static final double DARK_SHARE = 0.1;
+
     private TraceBuilder() {
     }
 
@@ -233,10 +236,17 @@ public final class TraceBuilder {
             HeatmapWindow window, double snapMeters, List<Command> commands) {
         double metersPerPixel = window.metersPerPixel(end.lat());
         Point2D.Double p = window.toPixel(end.getCoor());
+        // The nearest point, unless the line to it crosses dark ground and another one is reached over the heat
+        int endHeat = heatAround(window, p);
         double best = snapMeters / metersPerPixel;
+        double bestOnHeat = best;
         Way bestWay = null;
         int bestIndex = -1;
         Point2D.Double bestPoint = null;
+        boolean bestDark = false;
+        Way heatWay = null;
+        int heatIndex = -1;
+        Point2D.Double heatPoint = null;
         for (Way way : candidates) {
             List<Node> nodes = modified.getOrDefault(way, way.getNodes());
             for (int i = 0; i < nodes.size() - 1; i++) {
@@ -244,13 +254,29 @@ public final class TraceBuilder {
                 Point2D.Double b = window.toPixel(nodes.get(i + 1).getCoor());
                 Point2D.Double q = nearestOnSegment(p, a, b);
                 double d = p.distance(q);
+                if (d >= best && d >= bestOnHeat) {
+                    continue;
+                }
+                boolean dark = endHeat > 0 && minHeat(window, p, q) < DARK_SHARE * endHeat;
                 if (d < best) {
                     best = d;
                     bestWay = way;
                     bestIndex = i;
                     bestPoint = q;
+                    bestDark = dark;
+                }
+                if (!dark && d < bestOnHeat) {
+                    bestOnHeat = d;
+                    heatWay = way;
+                    heatIndex = i;
+                    heatPoint = q;
                 }
             }
+        }
+        if (bestDark && heatWay != null) {
+            bestWay = heatWay;
+            bestIndex = heatIndex;
+            bestPoint = heatPoint;
         }
         if (bestWay == null) {
             return null;
@@ -270,6 +296,35 @@ public final class TraceBuilder {
         return node;
     }
 
+    /** Hottest intensity in the 3x3 pixels around a point of the window. */
+    private static int heatAround(HeatmapWindow window, Point2D.Double p) {
+        int[][] intensity = window.getIntensity();
+        int heat = 0;
+        for (int dy = -1; dy <= 1; dy++) {
+            for (int dx = -1; dx <= 1; dx++) {
+                heat = Math.max(heat, intensityAt(intensity, (int) Math.floor(p.x) + dx, (int) Math.floor(p.y) + dy));
+            }
+        }
+        return heat;
+    }
+
+    /** Least intensity along the straight line between two points of the window. */
+    private static int minHeat(HeatmapWindow window, Point2D.Double a, Point2D.Double b) {
+        int[][] intensity = window.getIntensity();
+        double length = a.distance(b);
+        int min = Integer.MAX_VALUE;
+        for (double s = 0; s <= length; s += 0.5) {
+            double f = length == 0 ? 0 : s / length;
+            min = Math.min(min, intensityAt(intensity, (int) Math.floor(a.x + f * (b.x - a.x)),
+                    (int) Math.floor(a.y + f * (b.y - a.y))));
+        }
+        return min == Integer.MAX_VALUE ? 0 : min;
+    }
+
+    private static int intensityAt(int[][] intensity, int x, int y) {
+        return y >= 0 && x >= 0 && y < intensity.length && x < intensity[0].length ? intensity[y][x] : 0;
+    }
+
     private static Point2D.Double nearestOnSegment(Point2D.Double p, Point2D.Double a, Point2D.Double b) {
         double dx = b.x - a.x;
         double dy = b.y - a.y;
@@ -278,3 +333,4 @@ public final class TraceBuilder {
         return new Point2D.Double(a.x + t * dx, a.y + t * dy);
     }
 }
+

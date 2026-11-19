@@ -31,7 +31,7 @@ The plugin can also be downloaded from the [releases](https://github.com/erickde
    - if the trace reaches the border of the downloaded tiles, **downloads more tiles** and traces again (up to 7×7 tiles);
    - **aligns each trace with Slide** (see below), which follows the strongest trail around the line: the junctions between the traces stay in place, and a trace Slide cannot align is kept as traced (`stravatracer.slide=false` turns this off);
    - creates the ways with the configured tags, sharing the node at the junctions;
-   - connects each free end to the nearest existing way: reuses a node closer than 3 m, or inserts a new node in the way.
+   - connects each free end to the nearest existing way, unless the line to it crosses dark ground (heat below a tenth of the heat at the end) and another way is reached over the heat, where the trail goes on: reuses a node closer than 3 m, or inserts a new node in the way.
 4. Everything is a single command: **Ctrl+Z undoes it**. The created ways are selected, so that you can review them and complete their tags.
 
 Always review before uploading: the heatmap shows where people go, not whether there is an actual way.
